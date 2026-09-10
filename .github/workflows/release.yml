@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      CGO_ENABLED: "0"
+      GOOS: windows
+      GOARCH: amd64
+    steps:
+      - name: Check out source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: 1.26.5
+          cache: true
+
+      - name: Test, build, and package
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $sourceVersion = (& go run ./cmd/releasetool source-version --source internal/app/about.go).Trim()
+
+          $tagExists = (git tag --list $sourceVersion) -eq $sourceVersion
+          if ($env:GITHUB_REF_NAME -eq "main" -and -not $tagExists) {
+            $version = $sourceVersion
+            $releaseTag = $sourceVersion
+          } else {
+            $version = "dev-$sourceVersion"
+            $releaseTag = "dev"
+          }
+          $packagePath = "release/CommandTrayHost-$version-windows-amd64.zip"
+          "VERSION=$version" >> $env:GITHUB_ENV
+          "RELEASE_TAG=$releaseTag" >> $env:GITHUB_ENV
+          "PACKAGE_PATH=$packagePath" >> $env:GITHUB_ENV
+
+          go test ./...
+          go vet ./...
+
+          New-Item -ItemType Directory -Force release | Out-Null
+          $buildTime = [DateTimeOffset]::Parse((git show -s --format=%cI $env:GITHUB_SHA)).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ")
+          $ldflags = "-H=windowsgui -s -w -X github.com/fcying/CommandTrayHostGo/internal/app.Version=$version -X github.com/fcying/CommandTrayHostGo/internal/app.BuildTime=$buildTime -X github.com/fcying/CommandTrayHostGo/internal/updater.Repository=$env:GITHUB_REPOSITORY"
+          $resourcePath = "cmd/commandtrayhost/commandtrayhost_resources_windows_amd64.syso"
+          try {
+            go run ./cmd/releasetool windows-resource --version $version --manifest cmd/commandtrayhost/commandtrayhost.manifest --icon cmd/commandtrayhost/taskbar.ico --small-icon cmd/commandtrayhost/small.ico --out $resourcePath
+            go build -trimpath -ldflags $ldflags -o release/CommandTrayHost.exe ./cmd/commandtrayhost
+          } finally {
+            Remove-Item $resourcePath -Force -ErrorAction SilentlyContinue
+          }
+          go run ./cmd/releasetool pe-resources --exe release/CommandTrayHost.exe --version $version
+          go run ./cmd/releasetool package --exe release/CommandTrayHost.exe --license LICENSE --out $packagePath
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:RELEASE_TAG -eq "dev") {
+            $releases = gh release list --limit 100 --json tagName | ConvertFrom-Json
+            if (@($releases).tagName -contains "dev") {
+              gh release delete dev --yes
+            }
+            $tagRefs = gh api "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/dev" | ConvertFrom-Json
+            if (@($tagRefs).ref -contains "refs/tags/dev") {
+              gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/git/refs/tags/dev"
+            }
+            gh release create dev $env:PACKAGE_PATH `
+              --target $env:GITHUB_SHA `
+              --prerelease `
+              --draft `
+              --title $env:VERSION `
+              --notes "Development build from $env:GITHUB_REF_NAME at $env:GITHUB_SHA."
+          } else {
+            $arguments = @(
+              "release", "create", $env:RELEASE_TAG,
+              $env:PACKAGE_PATH,
+              "--target", $env:GITHUB_SHA,
+              "--generate-notes",
+              "--title", $env:VERSION
+            )
+            if ($env:VERSION.Contains("-")) {
+              $arguments += "--prerelease"
+            }
+            gh @arguments
+          }

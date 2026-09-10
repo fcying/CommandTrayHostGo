@@ -1,0 +1,13 @@
+# Build and test output
+# dist/
+*.exe
+*.test
+*.out
+coverage.out
+cmd/commandtrayhost/commandtrayhost_resources_windows_amd64.syso
+
+# Runtime state beside the executable
+config.json
+command_tray_host.cache
+*.log
+temp/
