@@ -1153,10 +1153,9 @@ func (a *TrayApp) beginStopEntryWithOptions(index int, operation processOperatio
 		return false
 	}
 	process := entry.process
-	name := entry.config.Name
-	timeout := entry.config.EffectiveKillTimeout()
-	killTree := entry.config.KillProcessTree
-	isGUI := entry.config.IsGUI
+	entryConfig := entry.config
+	controller := a.processes
+	name := entryConfig.Name
 	result := processResult{
 		index:       index,
 		generation:  entry.state.Generation,
@@ -1193,7 +1192,7 @@ func (a *TrayApp) beginStopEntryWithOptions(index int, operation processOperatio
 	a.processWorkers.Add(1)
 	go func() {
 		defer a.processWorkers.Done()
-		if err := process.Stop(timeout, killTree, isGUI); err != nil {
+		if err := controller.stop(process, entryConfig); err != nil {
 			result.err = fmt.Errorf("stop %s: %w", name, err)
 		}
 		a.processResults <- result
@@ -1226,9 +1225,8 @@ func (a *TrayApp) beginReloadStop(target reloadStopState, reloadID uint64) {
 		hwnd:       entry.hwnd,
 	}
 	name := entry.config.Name
-	timeout := entry.config.EffectiveKillTimeout()
-	killTree := entry.config.KillProcessTree
-	isGUI := entry.config.IsGUI
+	entryConfig := entry.config
+	controller := a.processes
 	entry.process = nil
 	entry.hwnd = 0
 	entry.needsWindow = false
@@ -1238,7 +1236,7 @@ func (a *TrayApp) beginReloadStop(target reloadStopState, reloadID uint64) {
 	a.processWorkers.Add(1)
 	go func() {
 		defer a.processWorkers.Done()
-		if err := process.Stop(timeout, killTree, isGUI); err != nil {
+		if err := controller.stop(process, entryConfig); err != nil {
 			result.err = fmt.Errorf("stop %s for config reload: %w", name, err)
 		}
 		a.processResults <- result
@@ -2603,6 +2601,12 @@ func (a *TrayApp) handleProcessResults() {
 						}
 					} else if result.operation == processCronFinalStop {
 						errs = append(errs, a.completeCronFinalStop(result.index, result.cronToken, nil))
+					} else if result.operation == processRestart && !a.closing.Load() {
+						entry.state.Enabled = true
+						entry.state.Show = result.show
+						if err := a.startEntry(result.index, true); err != nil {
+							errs = append(errs, err)
+						}
 					}
 				} else {
 					if result.operation == processStop {
@@ -2747,7 +2751,7 @@ resultsDrained:
 	for i := range a.entries {
 		entry := &a.entries[i]
 		if entry.ownership == domain.ManagedAndJobOwned && entry.process != nil {
-			if entry.process.Stop(entry.config.EffectiveKillTimeout(), entry.config.KillProcessTree, entry.config.IsGUI) == nil {
+			if a.processes.stop(entry.process, entry.config) == nil {
 				entry.process = nil
 			}
 		}
@@ -2877,14 +2881,13 @@ func (a *TrayApp) cleanupSessionEnd(timeout time.Duration) {
 			continue
 		}
 		process := entry.process
-		timeout := entry.config.EffectiveKillTimeout()
-		killTree := entry.config.KillProcessTree
-		isGUI := entry.config.IsGUI
+		entryConfig := entry.config
+		controller := a.processes
 		entry.process = nil
 		stops.Add(1)
 		go func() {
 			defer stops.Done()
-			_ = process.Stop(timeout, killTree, isGUI)
+			_ = controller.stop(process, entryConfig)
 		}()
 	}
 	a.restoreAllDockedWindows()

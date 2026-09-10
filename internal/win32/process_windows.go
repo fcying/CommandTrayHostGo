@@ -65,6 +65,7 @@ type processController struct {
 
 type childProcess struct {
 	handle     windows.Handle
+	treeJob    windows.Handle
 	helperPath string
 	pid        uint32
 }
@@ -265,16 +266,34 @@ func (c *processController) startElevated(entry config.EntryConfig, executable, 
 }
 
 func (c *processController) finishStart(name string, ownership domain.Ownership, handle, thread windows.Handle, pid uint32) (*childProcess, error) {
+	var treeJob windows.Handle
 	closeStartedProcess := func() {
 		_ = windows.TerminateProcess(handle, 1)
 		_, _ = windows.WaitForSingleObject(handle, 5000)
 		windows.CloseHandle(thread)
 		windows.CloseHandle(handle)
+		if treeJob != 0 {
+			windows.CloseHandle(treeJob)
+		}
+	}
+	if ownership == domain.ManagedAndJobOwned {
+		var err error
+		treeJob, err = windows.CreateJobObject(nil, nil)
+		if err != nil {
+			closeStartedProcess()
+			return nil, fmt.Errorf("create %s process tree job: %w", name, err)
+		}
 	}
 	if ownership != domain.FullyDetached {
 		if err := windows.AssignProcessToJobObject(c.job, handle); err != nil {
 			closeStartedProcess()
 			return nil, fmt.Errorf("assign %s to job object: %w", name, err)
+		}
+	}
+	if treeJob != 0 {
+		if err := windows.AssignProcessToJobObject(treeJob, handle); err != nil {
+			closeStartedProcess()
+			return nil, fmt.Errorf("assign %s to process tree job: %w", name, err)
 		}
 	}
 	if _, err := windows.ResumeThread(thread); err != nil {
@@ -286,7 +305,7 @@ func (c *processController) finishStart(name string, ownership domain.Ownership,
 		windows.CloseHandle(handle)
 		return nil, nil
 	}
-	return &childProcess{handle: handle, pid: pid, helperPath: c.executablePath}, nil
+	return &childProcess{handle: handle, treeJob: treeJob, pid: pid, helperPath: c.executablePath}, nil
 }
 
 func (c *processController) resolveCommand(entry config.EntryConfig) (string, string, string, error) {
@@ -433,8 +452,51 @@ func (p *childProcess) ownsWindow(hwnd uintptr) bool {
 	return windowPID == p.pid
 }
 
+func (c *processController) stop(process *childProcess, entry config.EntryConfig) error {
+	var commandErr error
+	if entry.StopCommand != "" {
+		commandErr = c.runStopCommand(entry)
+	}
+	stopErr := process.Stop(entry.EffectiveKillTimeout(), entry.KillProcessTree, entry.IsGUI)
+	return errors.Join(commandErr, stopErr)
+}
+
+func (c *processController) runStopCommand(entry config.EntryConfig) error {
+	_, _, _, workingDirectory, err := resolveEntryCommand(c.baseDir, entry)
+	if err != nil {
+		return fmt.Errorf("resolve stop_cmd working directory: %w", err)
+	}
+	systemDirectory, err := windows.GetSystemDirectory()
+	if err != nil {
+		return fmt.Errorf("resolve System32 for stop_cmd: %w", err)
+	}
+	command := exec.Command(filepath.Join(systemDirectory, "cmd.exe"))
+	command.Args = nil
+	command.Dir = workingDirectory
+	// cmd.exe does not use CommandLineToArgvW; provide its command line verbatim.
+	command.SysProcAttr = &syscall.SysProcAttr{
+		CmdLine:    `/d /s /c "` + entry.StopCommand + `"`,
+		HideWindow: true,
+	}
+	if err := command.Run(); err != nil {
+		return fmt.Errorf("run stop_cmd: %w", err)
+	}
+	return nil
+}
+
 func (p *childProcess) Stop(timeout uint32, killTree, isGUI bool) error {
 	if p == nil || p.handle == 0 {
+		return nil
+	}
+	if killTree && p.treeJob != 0 {
+		if err := windows.TerminateJobObject(p.treeJob, 0); err != nil {
+			return fmt.Errorf("terminate process tree for PID %d: %w", p.pid, err)
+		}
+		exited, err := p.waitForExit(5000)
+		if !exited {
+			return fmt.Errorf("process tree for PID %d did not stop: %w", p.pid, err)
+		}
+		p.Close()
 		return nil
 	}
 	running, err := p.running()
@@ -558,11 +620,17 @@ func (p *childProcess) waitForExit(timeout uint32) (bool, error) {
 }
 
 func (p *childProcess) Close() {
-	if p == nil || p.handle == 0 {
+	if p == nil {
 		return
 	}
-	windows.CloseHandle(p.handle)
-	p.handle = 0
+	if p.handle != 0 {
+		windows.CloseHandle(p.handle)
+		p.handle = 0
+	}
+	if p.treeJob != 0 {
+		windows.CloseHandle(p.treeJob)
+		p.treeJob = 0
+	}
 }
 
 func enumCloseWindows(pid uint32) {

@@ -140,6 +140,14 @@ func TestEntryDefaults(t *testing.T) {
 	}
 }
 
+func TestParseRejectsNULInStopCommand(t *testing.T) {
+	data := strings.Replace(validConfig, `"enabled": true,`, `"enabled": true,
+    "stop_cmd": "echo\u0000bad",`, 1)
+	if _, err := Parse([]byte(data)); err == nil || !strings.Contains(err.Error(), "stop_cmd must not contain NUL") {
+		t.Fatalf("Parse error = %v, want NUL stop_cmd validation error", err)
+	}
+}
+
 func TestUpdateOptions(t *testing.T) {
 	cfg, err := parseWithRootFields(`"auto_update": false, "skip_prerelease": false`)
 	if err != nil {
@@ -605,6 +613,7 @@ func TestParseRejectsNullKnownFields(t *testing.T) {
 		{name: "required boolean", field: `"enabled": null`},
 		{name: "optional boolean", field: `"require_admin": null`},
 		{name: "optional timeout", field: `"kill_timeout": null`},
+		{name: "optional command", field: `"stop_cmd": null`},
 		{name: "ownership boolean", field: `"not_host_by_commandtrayhost": null`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

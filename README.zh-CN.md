@@ -106,6 +106,7 @@ Windows 路径可以使用 `/`, 避免在 JSON 字符串中转义 `\`.
       "is_gui": false,
       "enabled": false,
       "start_show": true,
+      "stop_cmd": "",
       "kill_timeout": 500,
       "kill_process_tree": true
     }
@@ -262,8 +263,9 @@ enabled
 |`topmost`|`false`|窗口置顶.|
 |`not_host_by_commandtrayhost`|`false`|fully detached: 不加入 Job Object, 不保留进程句柄, 不提供窗口和停止控制.|
 |`not_monitor_by_commandtrayhost`|`false`|job-only: 加入 Job Object, 但不保留进程句柄或提供窗口和停止控制. 同时设置两个字段时本字段优先.|
+|`stop_cmd`|空|可选停止命令. 停用时先在 entry 工作目录中通过隐藏的 `cmd.exe /d /s /c` 执行, 再执行原有停止流程. 即使命令失败, 仍继续执行 `WM_CLOSE`/等待/`TerminateProcess` 或专属 Job Object 清理. 命令必须自行结束.|
 |`kill_timeout`|`200`|范围 `0..4294967294` 毫秒. `kill_process_tree=false` 时等待进程退出;GUI 窗口会先收到关闭请求.|
-|`kill_process_tree`|`false`|`true` 立即通过 `taskkill /F /T` 请求强制终止进程树,不等待 `kill_timeout`. `false` 等待 `kill_timeout`,必要时再只终止根进程.|
+|`kill_process_tree`|`false`|`true` 立即终止 entry 的专属 Job Object, 包括 `stop_cmd` 先结束根进程后仍存活的后代, 不等待 `kill_timeout`. `false` 等待 `kill_timeout`, 必要时再只终止根进程.|
 |`exclusion_id`|未设置|范围 `1..2147483647` 的整数. 启动前停止同 ID 的其他运行中受管 entry,但跳过 `ignore_all` 项. 不允许用于 detached/job-only entry.|
 |`hotkey`|空对象|当前 entry 的热键映射.|
 |`crontab_config`|未设置|当前 entry 的 cron 配置.|

@@ -106,6 +106,7 @@ Windows paths may use `/` to avoid escaping `\` in JSON strings.
       "is_gui": false,
       "enabled": false,
       "start_show": true,
+      "stop_cmd": "",
       "kill_timeout": 500,
       "kill_process_tree": true
     }
@@ -260,8 +261,9 @@ Only SemVer tags such as `v1.2.3` and `v1.2.3-rc.1` are accepted. Each checker i
 | `topmost` | `false` | Keep the target window topmost. |
 | `not_host_by_commandtrayhost` | `false` | Fully detached mode: no Job Object assignment, retained process handle, stop control, or window control. |
 | `not_monitor_by_commandtrayhost` | `false` | Job-only mode: keep Job Object ownership but no retained process handle, stop control, or window control. Takes precedence when both ownership fields are true. |
+| `stop_cmd` | empty | Optional command executed through hidden `cmd.exe /d /s /c` in the entry working directory before the normal stop flow. The normal `WM_CLOSE`/wait/`TerminateProcess` or dedicated Job Object cleanup still runs, even when this command fails. The command must finish on its own. |
 | `kill_timeout` | `200` | Range `0..4294967294` milliseconds. Wait for exit when `kill_process_tree=false`; GUI windows first receive a close request. |
-| `kill_process_tree` | `false` | `true` immediately requests forced process-tree termination with `taskkill /F /T`, without waiting for `kill_timeout`. `false` waits for `kill_timeout` before terminating only the root process if needed. |
+| `kill_process_tree` | `false` | `true` immediately terminates the entry's dedicated Job Object, including descendants that remain after `stop_cmd` exits the root process, without waiting for `kill_timeout`. `false` waits for `kill_timeout` before terminating only the root process if needed. |
 | `exclusion_id` | unset | Integer in `1..2147483647`. Starting this entry first stops other running managed entries with the same ID, except `ignore_all` peers. Not valid for detached or job-only entries. |
 | `hotkey` | empty object | Per-entry hotkey mapping. |
 | `crontab_config` | unset | Per-entry cron configuration. |

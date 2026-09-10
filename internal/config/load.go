@@ -71,6 +71,7 @@ const defaultConfigEnglish = `{
       "size": [0.45, 0.65],
       "alpha": 235,
       "topmost": false,
+      "stop_cmd": "",
       "kill_timeout": 500
     },
     {
@@ -88,6 +89,7 @@ const defaultConfigEnglish = `{
       "size": [0.4, 0.4],
       "alpha": 235,
       "topmost": false,
+      "stop_cmd": "",
       "kill_timeout": 500,
       "kill_process_tree": true
     }
@@ -133,6 +135,7 @@ const defaultConfigChinese = `{
       "size": [0.45, 0.65],
       "alpha": 235,
       "topmost": false,
+      "stop_cmd": "",
       "kill_timeout": 500
     },
     {
@@ -150,6 +153,7 @@ const defaultConfigChinese = `{
       "size": [0.4, 0.4],
       "alpha": 235,
       "topmost": false,
+      "stop_cmd": "",
       "kill_timeout": 500,
       "kill_process_tree": true
     }
@@ -186,6 +190,7 @@ var knownEntryFields = [...]string{
 	"topmost",
 	"not_host_by_commandtrayhost",
 	"not_monitor_by_commandtrayhost",
+	"stop_cmd",
 	"kill_timeout",
 	"kill_process_tree",
 	"exclusion_id",
@@ -509,6 +514,9 @@ func (c Config) validate() error {
 		}
 		if entry.Command == "" {
 			return fmt.Errorf("configs[%d].cmd must not be empty", i)
+		}
+		if strings.IndexByte(entry.StopCommand, 0) >= 0 {
+			return fmt.Errorf("configs[%d].stop_cmd must not contain NUL", i)
 		}
 		if entry.KillTimeout != nil && (*entry.KillTimeout < 0 || *entry.KillTimeout >= int64(^uint32(0))) {
 			return fmt.Errorf("configs[%d].kill_timeout must be between 0 and %d", i, uint64(^uint32(0)-1))

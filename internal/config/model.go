@@ -54,6 +54,7 @@ type EntryConfig struct {
 	Topmost           bool         `json:"topmost"`
 	NotHosted         bool         `json:"not_host_by_commandtrayhost"`
 	NotMonitored      bool         `json:"not_monitor_by_commandtrayhost"`
+	StopCommand       string       `json:"stop_cmd"`
 	KillTimeout       *int64       `json:"kill_timeout"`
 	KillProcessTree   bool         `json:"kill_process_tree"`
 	ExclusionID       *int64       `json:"exclusion_id"`
