@@ -384,7 +384,7 @@ Run 项名使用完整 EXE 路径 SHA-256 的紧凑 URL-safe 编码,含前缀共
 
 需要:
 
-- Go 1.26.
+- Go 1.27.
 - [`just`](https://github.com/casey/just).
 - WSL2 或其他可以交叉编译 Windows amd64 Go 程序的环境.
 

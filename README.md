@@ -382,7 +382,7 @@ Run value names use a compact, URL-safe encoding of the full executable-path SHA
 
 Requirements:
 
-- Go 1.26.
+- Go 1.27.
 - [`just`](https://github.com/casey/just).
 - WSL2 or another environment capable of cross-compiling a Windows amd64 Go application.
 
