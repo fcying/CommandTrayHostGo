@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/fcying/CommandTrayHostGo/internal/updater"
 	"github.com/tc-hib/winres"
@@ -97,16 +98,21 @@ func run(arguments []string) error {
 		executable := flags.String("exe", "", "path to CommandTrayHost.exe")
 		license := flags.String("license", "", "path to LICENSE")
 		output := flags.String("out", "", "output ZIP path")
+		modified := flags.String("modified", "", "RFC3339 modification time for ZIP entries")
 		if err := flags.Parse(arguments[1:]); err != nil {
 			return err
 		}
 		if err := rejectArguments(flags); err != nil {
 			return err
 		}
-		if *executable == "" || *license == "" || *output == "" {
-			return errors.New("package requires --exe, --license, and --out")
+		if *executable == "" || *license == "" || *output == "" || *modified == "" {
+			return errors.New("package requires --exe, --license, --out, and --modified")
 		}
-		return updater.CreatePackage(*executable, *license, *output)
+		modifiedTime, err := time.Parse(time.RFC3339, *modified)
+		if err != nil {
+			return fmt.Errorf("parse package modification time: %w", err)
+		}
+		return updater.CreatePackage(*executable, *license, *output, modifiedTime)
 	case "pe-resources":
 		flags := flag.NewFlagSet("pe-resources", flag.ContinueOnError)
 		executable := flags.String("exe", "", "path to CommandTrayHost.exe")

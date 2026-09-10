@@ -28,7 +28,7 @@ func TestRunReleaseFlow(t *testing.T) {
 	if err := run([]string{"version", "--version", "v3.0.0"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := run([]string{"package", "--exe", executable, "--license", licensePath, "--out", packagePath}); err != nil {
+	if err := run([]string{"package", "--exe", executable, "--license", licensePath, "--out", packagePath, "--modified", "2026-09-10T00:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 	publicKey, privateKey, err := ed25519.GenerateKey(nil)
@@ -91,6 +91,7 @@ func TestRunRejectsMissingArguments(t *testing.T) {
 		{"windows-resource", "--version", "v3.0.0"},
 		{"package"},
 		{"package", "--exe", "CommandTrayHost.exe", "--out", "package.zip"},
+		{"package", "--exe", "CommandTrayHost.exe", "--license", "LICENSE", "--out", "package.zip"},
 		{"pe-resources"},
 		{"manifest"},
 		{"verify"},

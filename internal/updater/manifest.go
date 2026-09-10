@@ -230,7 +230,11 @@ func DecodePublicKey(value string) (ed25519.PublicKey, error) {
 	return ed25519.PublicKey(raw), nil
 }
 
-func CreatePackage(executablePath, licensePath, packagePath string) error {
+func CreatePackage(executablePath, licensePath, packagePath string, modified time.Time) error {
+	modified = modified.UTC().Truncate(time.Second)
+	if modified.Before(time.Date(1980, time.January, 1, 0, 0, 0, 0, time.UTC)) || modified.After(time.Unix(int64(^uint32(0)), 0)) {
+		return errors.New("package modification time is outside the ZIP timestamp range")
+	}
 	type packageSource struct {
 		path    string
 		file    *os.File
@@ -279,7 +283,7 @@ func CreatePackage(executablePath, licensePath, packagePath string) error {
 	for _, source := range sources {
 		header := &zip.FileHeader{Name: source.name, Method: zip.Deflate}
 		header.SetMode(source.mode)
-		header.Modified = time.Date(1980, time.January, 1, 0, 0, 0, 0, time.UTC)
+		header.Modified = modified
 		entry, createErr := archive.CreateHeader(header)
 		if createErr != nil {
 			err = createErr

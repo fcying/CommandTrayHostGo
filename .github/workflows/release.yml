@@ -67,7 +67,7 @@ jobs:
             Remove-Item $resourcePath -Force -ErrorAction SilentlyContinue
           }
           go run ./cmd/releasetool pe-resources --exe release/CommandTrayHost.exe --version $version
-          go run ./cmd/releasetool package --exe release/CommandTrayHost.exe --license LICENSE --out $packagePath
+          go run ./cmd/releasetool package --exe release/CommandTrayHost.exe --license LICENSE --out $packagePath --modified $buildTime
 
       - name: Publish release
         shell: pwsh

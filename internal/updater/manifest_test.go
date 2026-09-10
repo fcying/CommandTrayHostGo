@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestManifestRoundTripAndSignature(t *testing.T) {
@@ -24,7 +25,7 @@ func TestManifestRoundTripAndSignature(t *testing.T) {
 		t.Fatal(err)
 	}
 	packagePath := filepath.Join(directory, "CommandTrayHost-v3.0.0-windows-amd64.zip")
-	if err := CreatePackage(executable, license, packagePath); err != nil {
+	if err := CreatePackage(executable, license, packagePath, time.Date(2026, time.September, 10, 0, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
 	manifest, err := BuildManifest("owner/repository", "v3.0.0", packagePath)
@@ -96,12 +97,13 @@ func TestCreatePackageIsDeterministic(t *testing.T) {
 	if err := os.WriteFile(license, wantLicense, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	modified := time.Date(2026, time.September, 10, 12, 34, 56, 0, time.UTC)
 	first := filepath.Join(directory, "first.zip")
 	second := filepath.Join(directory, "second.zip")
-	if err := CreatePackage(executable, license, first); err != nil {
+	if err := CreatePackage(executable, license, first, modified); err != nil {
 		t.Fatal(err)
 	}
-	if err := CreatePackage(executable, license, second); err != nil {
+	if err := CreatePackage(executable, license, second, modified); err != nil {
 		t.Fatal(err)
 	}
 	firstData, err := os.ReadFile(first)
@@ -122,6 +124,11 @@ func TestCreatePackageIsDeterministic(t *testing.T) {
 	defer archive.Close()
 	if len(archive.File) != 2 || archive.File[0].Name != ManifestEntry || archive.File[1].Name != LicenseEntry {
 		t.Fatalf("package entries = %+v", archive.File)
+	}
+	for _, entry := range archive.File {
+		if !entry.Modified.Equal(modified) {
+			t.Fatalf("%s modification time = %v, want %v", entry.Name, entry.Modified, modified)
+		}
 	}
 	licenseEntry, err := archive.File[1].Open()
 	if err != nil {
