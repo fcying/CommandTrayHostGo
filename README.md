@@ -280,6 +280,8 @@ Per-entry `hotkey` actions:
 
 Windows Terminal and other pseudoconsole hosts do not expose a traditional console HWND that can be controlled independently by child PID. Their processes can still be managed, but `is_gui=false` window position, size, opacity, topmost, and show controls are unavailable.
 
+A managed entry may run without a controllable window when it starts hidden and does not request an icon, position, size, opacity, or topmost state. Window discovery begins only when the configuration or a user action requires window control.
+
 ## Process ownership
 
 | Configuration | Mode | When the host exits | Runtime control |

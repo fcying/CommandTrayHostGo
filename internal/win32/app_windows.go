@@ -1113,13 +1113,19 @@ func (a *TrayApp) startEntry(index int, updateCache bool) error {
 		}
 		return err
 	}
+	a.completeEntryStart(index, process, updateCache)
+	return nil
+}
+
+func (a *TrayApp) completeEntryStart(index int, process *childProcess, updateCache bool) {
+	entry := &a.entries[index]
 	entry.process = process
 	entry.launched = true
 	entry.state.Running = process != nil
 	entry.state.Enabled = process != nil
 	entry.cronTransient = !updateCache && process != nil
 	entry.hwnd = 0
-	entry.needsWindow = !entry.config.IsGUI || entry.state.Show || hasWindowAppearance(entry.config)
+	entry.needsWindow = entryNeedsWindow(entry.config, entry.state.Show)
 	entry.findCount = 0
 	entry.findTimedOut = false
 	entry.retryWindowAt = time.Time{}
@@ -1135,7 +1141,6 @@ func (a *TrayApp) startEntry(index int, updateCache bool) error {
 		a.reportCacheError(a.flushCache())
 	}
 	a.reportWindowTimerError(a.updateWindowTimer())
-	return nil
 }
 
 func (a *TrayApp) beginStopEntry(index int, operation processOperation, cacheShow bool) {
@@ -1662,14 +1667,14 @@ func (a *TrayApp) finishReloadStop(result processResult) {
 		if err != nil {
 			reload.errs = append(reload.errs, result.err, err)
 			reload.failed = true
-			entry.needsWindow = !entry.config.IsGUI || entry.state.Show || hasWindowAppearance(entry.config)
+			entry.needsWindow = entryNeedsWindow(entry.config, entry.state.Show)
 		} else if running {
 			reload.errs = append(reload.errs, result.err)
 			reload.failed = true
 			if result.hwnd != 0 && entryOwnsWindow(entry, result.hwnd) {
 				entry.hwnd = result.hwnd
 			}
-			entry.needsWindow = entry.hwnd == 0 && (!entry.config.IsGUI || entry.state.Show || hasWindowAppearance(entry.config))
+			entry.needsWindow = entry.hwnd == 0 && entryNeedsWindow(entry.config, entry.state.Show)
 		} else {
 			stopped = true
 		}
@@ -1703,7 +1708,7 @@ func (a *TrayApp) rollbackReload() {
 		entry := &a.entries[target.index]
 		if entry.state.Running {
 			entry.cronTransient = target.cronTransient
-			entry.needsWindow = !entry.config.IsGUI || entry.state.Show || hasWindowAppearance(entry.config)
+			entry.needsWindow = entryNeedsWindow(entry.config, entry.state.Show)
 			entry.findCount = 0
 			entry.findTimedOut = false
 			entry.retryWindowAt = time.Time{}
@@ -1806,7 +1811,6 @@ func (a *TrayApp) commitReload() {
 		newEntries[i].cronTransient = oldEntry.cronTransient
 		if newEntries[i].hwnd != 0 && !entryOwnsWindow(&newEntries[i], newEntries[i].hwnd) {
 			newEntries[i].hwnd = 0
-			newEntries[i].needsWindow = true
 		}
 		iconsChanged := oldEntry.config.Icon != "" || cfg.Icon != "" || oldEntry.iconPending
 		if iconsChanged {
@@ -1840,11 +1844,13 @@ func (a *TrayApp) commitReload() {
 				newEntries[i].appearanceErr = nil
 			}
 		}
-		if newEntries[i].hwnd == 0 && (!cfg.IsGUI || newEntries[i].state.Show || hasWindowAppearance(cfg) || newEntries[i].iconPending || newEntries[i].appearancePending) {
-			newEntries[i].needsWindow = true
-			newEntries[i].findCount = 0
-			newEntries[i].findTimedOut = false
-			newEntries[i].retryWindowAt = time.Time{}
+		if newEntries[i].hwnd == 0 {
+			newEntries[i].needsWindow = entryNeedsWindow(cfg, newEntries[i].state.Show) || newEntries[i].iconPending || newEntries[i].appearancePending
+			if newEntries[i].needsWindow {
+				newEntries[i].findCount = 0
+				newEntries[i].findTimedOut = false
+				newEntries[i].retryWindowAt = time.Time{}
+			}
 		}
 	}
 	if a.console.process != nil && (a.config.Icon != "" || reload.config.Icon != "" || a.console.iconPending) {
@@ -2084,7 +2090,7 @@ func (a *TrayApp) discoverWindows() {
 				}
 			}
 			entry.retainedIconHWND = 0
-			entry.needsWindow = true
+			entry.needsWindow = entryNeedsWindow(entry.config, entry.state.Show) || entry.iconPending || entry.appearancePending
 			entry.findCount = 0
 			entry.findTimedOut = false
 			entry.retryWindowAt = time.Time{}
@@ -2506,6 +2512,10 @@ func showWindow(hwnd uintptr, visible bool) bool {
 	return ret != 0
 }
 
+func entryNeedsWindow(entry config.EntryConfig, show bool) bool {
+	return show || hasWindowAppearance(entry)
+}
+
 func hasWindowAppearance(entry config.EntryConfig) bool {
 	return entry.Icon != "" || hasWindowGeometryAppearance(entry)
 }
@@ -2568,7 +2578,7 @@ func (a *TrayApp) handleProcessResults() {
 				running, err := entry.process.running()
 				if err != nil {
 					errs = append(errs, err)
-					entry.needsWindow = !entry.config.IsGUI || entry.state.Show || hasWindowAppearance(entry.config)
+					entry.needsWindow = entryNeedsWindow(entry.config, entry.state.Show)
 					if result.operation == processExclusionStop {
 						if err := a.finishExclusionStop(result, false); err != nil {
 							errs = append(errs, err)
@@ -2601,7 +2611,7 @@ func (a *TrayApp) handleProcessResults() {
 						a.updateCachedStopState(result.index, result.cacheShow)
 						a.reportCacheError(a.flushCache())
 					}
-					entry.needsWindow = !entry.config.IsGUI || entry.state.Show || hasWindowAppearance(entry.config)
+					entry.needsWindow = entryNeedsWindow(entry.config, entry.state.Show)
 					if result.hwnd != 0 && entryOwnsWindow(entry, result.hwnd) {
 						entry.hwnd = result.hwnd
 						entry.needsWindow = false
