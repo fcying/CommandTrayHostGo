@@ -242,7 +242,7 @@ func entryOwnershipKey(entry EntryConfig) uint8 {
 }
 
 func (c Config) DisplayName() string {
-	return "CommandTrayHost"
+	return "CommandTrayHostGo"
 }
 
 func (c Config) EffectiveStartShowSilent() bool {

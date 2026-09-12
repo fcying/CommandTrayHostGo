@@ -133,7 +133,7 @@ func (c *processController) Start(entry config.EntryConfig, ownership domain.Own
 	}
 	if entry.RequireAdmin && !IsElevated() {
 		if ownership != domain.FullyDetached {
-			return nil, fmt.Errorf("%s requires administrator rights; elevate CommandTrayHost to keep the process in its job object", entry.Name)
+			return nil, fmt.Errorf("%s requires administrator rights; elevate %s to keep the process in its job object", entry.Name, productName)
 		}
 		return c.startElevated(entry, executable, parameters, workingDirectory)
 	}
@@ -197,7 +197,7 @@ func (c *processController) Start(entry config.EntryConfig, ownership domain.Own
 	if err != nil {
 		if errors.Is(err, windows.ERROR_ELEVATION_REQUIRED) {
 			if ownership != domain.FullyDetached {
-				return nil, fmt.Errorf("%s requires administrator rights; elevate CommandTrayHost to keep the process in its job object", entry.Name)
+				return nil, fmt.Errorf("%s requires administrator rights; elevate %s to keep the process in its job object", entry.Name, productName)
 			}
 			return c.startElevated(entry, executable, parameters, workingDirectory)
 		}
@@ -247,9 +247,9 @@ func (c *processController) StartConsoleFallback(title string) (*childProcess, e
 	runtime.KeepAlive(workingDirectory)
 	runtime.KeepAlive(titlePtr)
 	if err != nil {
-		return nil, fmt.Errorf("start CommandTrayHost console: %w", err)
+		return nil, fmt.Errorf("start %s console: %w", productName, err)
 	}
-	return c.finishStart("CommandTrayHost console", domain.ManagedAndJobOwned, processInfo.Process, processInfo.Thread, processInfo.ProcessId)
+	return c.finishStart(productName+" console", domain.ManagedAndJobOwned, processInfo.Process, processInfo.Thread, processInfo.ProcessId)
 }
 
 func (c *processController) startElevated(entry config.EntryConfig, executable, parameters, workingDirectory string) (*childProcess, error) {

@@ -421,7 +421,7 @@ func (a *TrayApp) writeCronLog(index int, minimumLevel int64, message string) er
 
 func (a *TrayApp) reportCronError(err error) {
 	if err != nil && !a.sessionEndPending && !a.closing.Load() && !a.closed {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 	}
 }
 

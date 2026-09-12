@@ -24,7 +24,7 @@ func TestManifestRoundTripAndSignature(t *testing.T) {
 	if err := os.WriteFile(license, []byte("MIT License fixture\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	packagePath := filepath.Join(directory, "CommandTrayHost-v3.0.0-windows-amd64.zip")
+	packagePath := filepath.Join(directory, "CommandTrayHostGo-v3.0.0-windows-amd64.zip")
 	if err := CreatePackage(executable, license, packagePath, time.Date(2026, time.September, 10, 0, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestKeyDecoding(t *testing.T) {
 
 func TestManifestRejectsInvalidPackage(t *testing.T) {
 	directory := t.TempDir()
-	path := filepath.Join(directory, "CommandTrayHost-v3.0.0-windows-amd64.zip")
+	path := filepath.Join(directory, "CommandTrayHostGo-v3.0.0-windows-amd64.zip")
 	if err := os.WriteFile(path, []byte("not a zip"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func validTestManifest() Manifest {
 		Assets: []ManifestAsset{{
 			OS:          "windows",
 			Arch:        "amd64",
-			Name:        "CommandTrayHost-v3.0.0-windows-amd64.zip",
+			Name:        "CommandTrayHostGo-v3.0.0-windows-amd64.zip",
 			Size:        1,
 			SHA256:      hash,
 			Entry:       ManifestEntry,

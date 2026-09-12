@@ -2,16 +2,16 @@
 
 ## Project Scope
 
-- This repository contains a Windows-only Go application. Its module path is `github.com/fcying/CommandTrayHostGo`; the product and executable names are `CommandTrayHost` and `CommandTrayHost.exe`.
+- This repository contains a Windows-only Go application. Its module path is `github.com/fcying/CommandTrayHostGo`; the product and executable names are `CommandTrayHostGo` and `CommandTrayHostGo.exe`.
 - Only Windows 10 or later on amd64 is supported. The main application and Win32 implementation use `windows && amd64` build tags.
 
 ## Build and Verification
 
 - Develop from WSL2 with `just`: `just test` runs the Go tests, `just check` runs the tests and Windows amd64 vet, `just build` produces the release-form Windows amd64 executable, and `just clean` removes in-repository build output.
 - Builds always use `GOOS=windows`, `GOARCH=amd64`, and `CGO_ENABLED=0`. Use `CTH_GOPROXY` to override the dependency proxy and `CTH_RELEASE_REPOSITORY` to override the update repository embedded in the executable.
-- `just build` writes `dist/windows-amd64/CommandTrayHost.exe` inside the repository and copies it to `~/workspace/CommandTrayHostGo/CommandTrayHost.exe`.
+- `just build` writes `dist/windows-amd64/CommandTrayHostGo.exe` inside the repository and copies it to `~/workspace/CommandTrayHostGo/CommandTrayHostGo.exe`.
 - The sole version source is `Version` in `internal/app/about.go`. `cmd/releasetool` generates the PE manifest, VERSIONINFO, and icon resources during the build. `cmd/commandtrayhost/commandtrayhost_resources_windows_amd64.syso` is temporary and must not be committed.
-- A release ZIP must contain `CommandTrayHost.exe` and the root `LICENSE`; its name is `CommandTrayHost-<version>-windows-amd64.zip`.
+- A release ZIP must contain `CommandTrayHostGo.exe` and the root `LICENSE`; its name is `CommandTrayHostGo-<version>-windows-amd64.zip`.
 - Cross-compilation alone is insufficient for Win32 behavior changes. Run `just check` and `just build` before committing. Changes to the tray, windows, processes, startup registration, hot reload, or session shutdown also require exercising the affected behavior in the Windows test environment.
 
 ## Change Conventions
@@ -24,7 +24,7 @@
 ## Release Behavior
 
 - `.github/workflows/release.yml` runs tests, vet, the Windows build, PE resource verification, and deterministic packaging on pushes to `main` or `dev`.
-- A push to `main` creates a formal Release when the source version tag does not exist. Other pushes to `main` or `dev` update the `dev` draft prerelease. Account for this publishing side effect before modifying or pushing either branch.
+- A push to `main` creates a formal Release when the source version tag does not exist. Other pushes to `main` or `dev` publish a versioned prerelease, deleting every older prerelease first. Account for this publishing side effect before modifying or pushing either branch.
 - The workflow fetches full Git history to inspect tags and generate release notes, and reads the build time from the current commit. Do not duplicate the version in another configuration file or maintain generated resources manually.
 - The repository is currently private. Inspecting its Actions runs and Releases requires authenticated GitHub access; an anonymous HTTP 404 does not establish that a run or Release is missing.
 
@@ -39,7 +39,7 @@
 ## Runtime Architecture and Invariants
 
 - `cmd/commandtrayhost/main_windows.go` resolves the final executable, configuration, and cache paths; acquires the singleton; loads configuration and cache state; handles elevation; and then starts the Win32 tray application.
-- `internal/app` contains platform-independent domain logic. `internal/config` parses, validates, and normalizes configuration. `internal/statecache` owns cache invalidation and reload rebasing. `internal/updater` performs read-only update checks and implements the release protocol.
+- `internal/app` contains platform-independent domain logic. `internal/config` parses, validates, and normalizes configuration. `internal/statecache` owns cache invalidation and reload rebasing. `internal/updater` checks, verifies, downloads, and applies the signed release protocol.
 - `internal/win32/app_windows.go` owns the hidden window, message loop, tray lifecycle, menus, hot reload, and final cache flush. Serialize mutations of UI, configuration, and runtime entry state through the message-loop path.
 - `internal/win32/singleton_windows.go` derives its mutex from the final physical executable path. Copies in different directories may run together; a global product-name mutex is a regression. Junctions and symlinks must not bypass the singleton for the same physical executable.
 - Managed children use a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. Exit, restart, elevation, `not_host_by_commandtrayhost`, `not_monitor_by_commandtrayhost`, and `kill_process_tree` deliberately alter ownership. Do not replace these paths with unconditional process termination or a single cleanup policy.

@@ -28,7 +28,7 @@ func AcquireInstance(executablePath string, waitForHandoff bool) (*Instance, err
 			}
 		}
 		windows.CloseHandle(handle)
-		return nil, fmt.Errorf("CommandTrayHost is already running from %s", executablePath)
+		return nil, fmt.Errorf("%s is already running from %s", productName, executablePath)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("CreateMutexW: %w", err)

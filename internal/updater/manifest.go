@@ -18,9 +18,9 @@ import (
 )
 
 const (
-	// Schema 1 defines the initial CommandTrayHost update package format.
+	// Schema 1 defines the initial CommandTrayHostGo update package format.
 	ManifestSchema       = 1
-	ManifestEntry        = "CommandTrayHost.exe"
+	ManifestEntry        = "CommandTrayHostGo.exe"
 	LicenseEntry         = "LICENSE"
 	MaxPackageSize int64 = 64 << 20
 	maxLicenseSize int64 = 64 << 10
@@ -141,7 +141,7 @@ func ValidateManifest(manifest Manifest) error {
 	if asset.OS != "windows" || asset.Arch != "amd64" {
 		return errors.New("manifest asset must target windows/amd64")
 	}
-	if asset.Name != "CommandTrayHost-"+manifest.Version+"-windows-amd64.zip" {
+	if asset.Name != "CommandTrayHostGo-"+manifest.Version+"-windows-amd64.zip" {
 		return errors.New("manifest asset name does not match the release version")
 	}
 	if asset.Size <= 0 || asset.Size > MaxPackageSize || asset.EntrySize <= 0 || asset.EntrySize > MaxPackageSize {
@@ -151,7 +151,7 @@ func ValidateManifest(manifest Manifest) error {
 		return errors.New("manifest SHA-256 values must be lowercase hexadecimal")
 	}
 	if asset.Entry != ManifestEntry {
-		return errors.New("manifest entry must be CommandTrayHost.exe")
+		return errors.New("manifest entry must be CommandTrayHostGo.exe")
 	}
 	return nil
 }
@@ -323,7 +323,7 @@ func inspectPackage(path string) (int64, string, error) {
 	defer archive.Close()
 	if len(archive.File) != 2 || archive.File[0].Name != ManifestEntry || archive.File[1].Name != LicenseEntry ||
 		archive.File[0].FileInfo().Mode()&os.ModeType != 0 || archive.File[1].FileInfo().Mode()&os.ModeType != 0 {
-		return 0, "", errors.New("package must contain exactly regular CommandTrayHost.exe and LICENSE entries")
+		return 0, "", errors.New("package must contain exactly regular CommandTrayHostGo.exe and LICENSE entries")
 	}
 	if archive.File[1].UncompressedSize64 == 0 || archive.File[1].UncompressedSize64 > uint64(maxLicenseSize) {
 		return 0, "", errors.New("package LICENSE size is outside the allowed range")

@@ -16,8 +16,8 @@ func TestRunReleaseFlow(t *testing.T) {
 	directory := t.TempDir()
 	executable := filepath.Join(directory, updater.ManifestEntry)
 	licensePath := filepath.Join(directory, updater.LicenseEntry)
-	packagePath := filepath.Join(directory, "CommandTrayHost-v3.0.0-windows-amd64.zip")
-	manifestPath := filepath.Join(directory, "CommandTrayHost-v3.0.0-update.json")
+	packagePath := filepath.Join(directory, "CommandTrayHostGo-v3.0.0-windows-amd64.zip")
+	manifestPath := filepath.Join(directory, "CommandTrayHostGo-v3.0.0-update.json")
 	signaturePath := manifestPath + ".sig"
 	if err := os.WriteFile(executable, []byte("release executable fixture"), 0o755); err != nil {
 		t.Fatal(err)
@@ -90,8 +90,8 @@ func TestRunRejectsMissingArguments(t *testing.T) {
 		{"windows-resource"},
 		{"windows-resource", "--version", "v3.0.0"},
 		{"package"},
-		{"package", "--exe", "CommandTrayHost.exe", "--out", "package.zip"},
-		{"package", "--exe", "CommandTrayHost.exe", "--license", "LICENSE", "--out", "package.zip"},
+		{"package", "--exe", "CommandTrayHostGo.exe", "--out", "package.zip"},
+		{"package", "--exe", "CommandTrayHostGo.exe", "--license", "LICENSE", "--out", "package.zip"},
 		{"pe-resources"},
 		{"manifest"},
 		{"verify"},
