@@ -46,13 +46,13 @@ const defaultConfigEnglish = `{
   "disable_cache_enabled": true,
   "disable_cache_show": false,
   "disable_cache_alpha": false,
-  "left_click": [0, 1],
+  "left_click": ["Window Control Test", "Ping Console Test"],
   "enable_groups": true,
   "groups_menu_symbol": "+",
   "groups": [
     {
       "name": "Tests",
-      "groups": [0, 1]
+      "groups": ["Window Control Test", "Ping Console Test"]
     }
   ],
   "configs": [
@@ -110,13 +110,13 @@ const defaultConfigChinese = `{
   "disable_cache_enabled": true,
   "disable_cache_show": false,
   "disable_cache_alpha": false,
-  "left_click": [0, 1],
+  "left_click": ["窗口控制测试", "Ping 控制台测试"],
   "enable_groups": true,
   "groups_menu_symbol": "+",
   "groups": [
     {
       "name": "测试",
-      "groups": [0, 1]
+      "groups": ["窗口控制测试", "Ping 控制台测试"]
     }
   ],
   "configs": [
@@ -400,7 +400,7 @@ func validateRequiredFields(data []byte) error {
 		}
 	}
 	if rawGroups, ok, _ := findUniqueJSONField(root, "groups", "config"); ok {
-		if err := validateGroupsJSON(rawGroups, len(entries)); err != nil {
+		if err := validateGroupsJSON(rawGroups); err != nil {
 			return err
 		}
 	}
@@ -495,16 +495,7 @@ func (c Config) validate() error {
 	if c.IconSize != nil && *c.IconSize != 16 && *c.IconSize != 32 && *c.IconSize != 256 {
 		return errors.New("icon_size must be 16, 32, or 256")
 	}
-	for i, index := range c.LeftClick {
-		if index < 0 || index >= len(c.Configs) {
-			return fmt.Errorf("left_click[%d] must reference a configs index", i)
-		}
-	}
-	if c.Groups != nil {
-		if err := validateGroups(*c.Groups, len(c.Configs)); err != nil {
-			return err
-		}
-	}
+	names := make(map[string]int, len(c.Configs))
 	for i, entry := range c.Configs {
 		if entry.Name == "" {
 			return fmt.Errorf("configs[%d].name must not be empty", i)
@@ -512,6 +503,10 @@ func (c Config) validate() error {
 		if strings.IndexByte(entry.Name, 0) >= 0 {
 			return fmt.Errorf("configs[%d].name must not contain NUL", i)
 		}
+		if previous, exists := names[entry.Name]; exists {
+			return fmt.Errorf("configs[%d].name %q duplicates configs[%d].name", i, entry.Name, previous)
+		}
+		names[entry.Name] = i
 		if entry.Command == "" {
 			return fmt.Errorf("configs[%d].cmd must not be empty", i)
 		}
@@ -540,6 +535,16 @@ func (c Config) validate() error {
 			if err := validateCronConfig(i, entry); err != nil {
 				return err
 			}
+		}
+	}
+	for i, name := range c.LeftClick {
+		if _, exists := names[name]; !exists {
+			return fmt.Errorf("left_click[%d] must reference an existing configs name: %q", i, name)
+		}
+	}
+	if c.Groups != nil {
+		if err := validateGroups(*c.Groups, names); err != nil {
+			return err
 		}
 	}
 	return nil

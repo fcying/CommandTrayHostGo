@@ -11,7 +11,7 @@ import (
 const projectAuthor = "fcying"
 
 var BuildTime = "unknown"
-var Version = "v0.3.0"
+var Version = "v0.4.0"
 
 func AboutText(product string, language i18n.Language) string {
 	text := i18n.Text(language)

@@ -272,13 +272,13 @@ func TestParseGroups(t *testing.T) {
 	cfg, err := Parse([]byte(`{
   "enable_groups": true,
   "groups_menu_symbol": "++",
-  "groups": [1, {"name": "Tools", "groups": [0, 1]}, 1],
+  "groups": ["two", {"name": "Tools", "groups": ["one", "two"]}, "two"],
   "configs": [{
     "name": "one", "path": ".", "cmd": "one.exe", "working_directory": "",
     "addition_env_path": "", "use_builtin_console": false, "is_gui": true, "enabled": true
   }, {
     "name": "two", "path": ".", "cmd": "two.exe", "working_directory": "",
-    "addition_env_path": "", "use_builtin_console": false, "is_gui": true, "enabled": true
+    "addition_env_path": "", "use_builtin_console": false, "is_gui": true, "enabled": false
   }]
 }`))
 	if err != nil {
@@ -288,10 +288,18 @@ func TestParseGroups(t *testing.T) {
 		t.Fatalf("unexpected groups config: %+v", cfg)
 	}
 	items := *cfg.Groups
-	if len(items) != 3 || items[0].EntryIndex == nil || *items[0].EntryIndex != 1 ||
+	if len(items) != 3 || items[0].EntryName == nil || *items[0].EntryName != "two" ||
 		items[1].Group == nil || items[1].Group.Name != "Tools" || len(items[1].Group.Items) != 2 ||
-		items[2].EntryIndex == nil || *items[2].EntryIndex != 1 {
+		items[2].EntryName == nil || *items[2].EntryName != "two" {
 		t.Fatalf("unexpected groups tree: %+v", items)
+	}
+	children := items[1].Group.Items
+	if children[0].EntryName == nil || *children[0].EntryName != "one" || children[1].EntryName == nil || *children[1].EntryName != "two" {
+		t.Fatalf("unexpected nested entry references: %+v", children)
+	}
+	cfg.Configs[0], cfg.Configs[1] = cfg.Configs[1], cfg.Configs[0]
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("reordered configs rejected: %v", err)
 	}
 }
 
@@ -327,16 +335,16 @@ func TestParseRejectsInvalidGroups(t *testing.T) {
 		fields string
 	}{
 		{name: "null root", fields: `"enable_groups": true, "groups": null`},
-		{name: "negative index", fields: `"enable_groups": true, "groups": [-1]`},
-		{name: "fractional index", fields: `"enable_groups": true, "groups": [0.5]`},
-		{name: "out of range", fields: `"enable_groups": true, "groups": [1]`},
+		{name: "legacy numeric index", fields: `"enable_groups": true, "groups": [0]`},
+		{name: "unknown entry", fields: `"enable_groups": true, "groups": ["missing"]`},
+		{name: "case mismatch", fields: `"enable_groups": true, "groups": [{"name": "x", "groups": ["Demo"]}]`},
 		{name: "missing name", fields: `"enable_groups": true, "groups": [{"groups": []}]`},
 		{name: "null name", fields: `"enable_groups": true, "groups": [{"name": null}]`},
 		{name: "null children", fields: `"enable_groups": true, "groups": [{"name": "x", "groups": null}]`},
 		{name: "non-array children", fields: `"enable_groups": true, "groups": [{"name": "x", "groups": {}}]`},
 		{name: "null symbol", fields: `"groups_menu_symbol": null`},
 		{name: "duplicate name", fields: `"enable_groups": true, "groups": [{"name": "x", "NAME": "y"}]`},
-		{name: "duplicate children", fields: `"enable_groups": true, "groups": [{"name": "x", "groups": [0], "GROUPS": []}]`},
+		{name: "duplicate children", fields: `"enable_groups": true, "groups": [{"name": "x", "groups": ["demo"], "GROUPS": []}]`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := parseWithRootFields(tc.fields); err == nil {
@@ -347,33 +355,35 @@ func TestParseRejectsInvalidGroups(t *testing.T) {
 }
 
 func TestGroupsMenuItemLimit(t *testing.T) {
-	items := strings.Repeat("0,", maxGroupItems) + "0"
+	items := strings.Repeat(`"demo",`, maxGroupItems-1) + `"demo"`
+	if _, err := parseWithRootFields(`"enable_groups": true, "groups": [` + items + `]`); err != nil {
+		t.Fatalf("rejected %d group menu items: %v", maxGroupItems, err)
+	}
+	items += `,"demo"`
 	if _, err := parseWithRootFields(`"enable_groups": true, "groups": [` + items + `]`); err == nil {
 		t.Fatalf("accepted more than %d group menu items", maxGroupItems)
 	}
 }
 
 func TestGroupsMaximumDepth(t *testing.T) {
-	leaf := GroupItem{EntryIndex: intPointer(0)}
+	name := "demo"
+	leaf := GroupItem{EntryName: &name}
+	names := map[string]int{name: 0}
 	items := []GroupItem{leaf}
 	for depth := 0; depth < maxGroupDepth; depth++ {
 		items = []GroupItem{{Group: &Group{Name: "group", Items: items}}}
 	}
-	if err := validateGroups(items, 1); err != nil {
+	if err := validateGroups(items, names); err != nil {
 		t.Fatalf("depth %d rejected: %v", maxGroupDepth, err)
 	}
 	tooDeep := []GroupItem{{Group: &Group{Name: "group", Items: items}}}
-	if err := validateGroups(tooDeep, 1); err == nil {
+	if err := validateGroups(tooDeep, names); err == nil {
 		t.Fatalf("depth %d accepted", maxGroupDepth+1)
 	}
 }
 
 func parseWithRootFields(fields string) (Config, error) {
 	return Parse([]byte(strings.Replace(validConfig, `"configs":`, fields+`, "configs":`, 1)))
-}
-
-func intPointer(value int) *int {
-	return &value
 }
 
 func TestHotkeyOptionDefaults(t *testing.T) {
@@ -415,33 +425,48 @@ func TestParseHotkeyConfig(t *testing.T) {
 }
 
 func TestParseLeftClick(t *testing.T) {
-	cfg, err := Parse([]byte(`{
-  "left_click": [0],
-  "configs": [{
-    "name": "demo",
-    "path": ".",
-    "cmd": "demo.exe",
-    "working_directory": "",
-    "addition_env_path": "",
-    "use_builtin_console": false,
-    "is_gui": true,
-    "enabled": true
-  }]
-}`))
-	if err != nil {
-		t.Fatal(err)
+	entry := func(name string, enabled bool) string {
+		return fmt.Sprintf(`{
+    "name": %q, "path": ".", "cmd": "demo.exe", "working_directory": "",
+    "addition_env_path": "", "use_builtin_console": false, "is_gui": true, "enabled": %t
+  }`, name, enabled)
 	}
-	if len(cfg.LeftClick) != 1 || cfg.LeftClick[0] != 0 {
-		t.Fatalf("LeftClick = %v, want [0]", cfg.LeftClick)
-	}
-	if _, err := Parse([]byte(`{
-  "left_click": [1],
-  "configs": [{
-    "name": "demo", "path": ".", "cmd": "demo.exe", "working_directory": "",
-    "addition_env_path": "", "use_builtin_console": false, "is_gui": true, "enabled": true
-  }]
-}`)); err == nil {
-		t.Fatal("Parse succeeded with invalid left_click index")
+	for _, test := range []struct {
+		name      string
+		leftClick string
+		entries   string
+		wantError bool
+	}{
+		{name: "Exact names including disabled", leftClick: `["demo", "Demo"]`, entries: entry("demo", true) + "," + entry("Demo", false)},
+		{name: "Reordered configs", leftClick: `["demo", "Demo"]`, entries: entry("Demo", false) + "," + entry("demo", true)},
+		{name: "Empty list", leftClick: `[]`, entries: entry("demo", true)},
+		{name: "Missing name", leftClick: `["missing"]`, entries: entry("demo", true), wantError: true},
+		{name: "Case mismatch", leftClick: `["Demo"]`, entries: entry("demo", true), wantError: true},
+		{name: "Legacy numeric index", leftClick: `[0]`, entries: entry("demo", true), wantError: true},
+		{name: "Duplicate enabled names", leftClick: `[]`, entries: entry("demo", true) + "," + entry("demo", true), wantError: true},
+		{name: "Duplicate disabled names", leftClick: `[]`, entries: entry("demo", false) + "," + entry("demo", false), wantError: true},
+		{name: "Duplicate mixed enabled names", leftClick: `[]`, entries: entry("demo", true) + "," + entry("demo", false), wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			data := fmt.Sprintf(`{"LEFT_CLICK": %s, "configs": [%s]}`, test.leftClick, test.entries)
+			cfg, err := Parse([]byte(data))
+			if test.wantError {
+				if err == nil {
+					t.Fatal("Parse succeeded, want invalid name or reference error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.leftClick == `[]` {
+				if len(cfg.LeftClick) != 0 {
+					t.Fatalf("LeftClick = %v, want empty list", cfg.LeftClick)
+				}
+			} else if len(cfg.LeftClick) != 2 || cfg.LeftClick[0] != "demo" || cfg.LeftClick[1] != "Demo" {
+				t.Fatalf("LeftClick = %v, want [demo Demo]", cfg.LeftClick)
+			}
+		})
 	}
 }
 
@@ -1007,11 +1032,10 @@ func TestLoadOrCreate(t *testing.T) {
 		language         i18n.Language
 		windowEntryName  string
 		consoleEntryName string
-		groupName        string
 		comment          string
 	}{
-		{name: "English", language: i18n.English, windowEntryName: "Window Control Test", consoleEntryName: "Ping Console Test", groupName: "Tests", comment: "Examples are disabled"},
-		{name: "Chinese", language: i18n.SimplifiedChinese, windowEntryName: "窗口控制测试", consoleEntryName: "Ping 控制台测试", groupName: "测试", comment: "示例默认禁用"},
+		{name: "English", language: i18n.English, windowEntryName: "Window Control Test", consoleEntryName: "Ping Console Test", comment: "Examples are disabled"},
+		{name: "Chinese", language: i18n.SimplifiedChinese, windowEntryName: "窗口控制测试", consoleEntryName: "Ping 控制台测试", comment: "示例默认禁用"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1042,9 +1066,6 @@ func TestLoadOrCreate(t *testing.T) {
 			}
 			if cfg.AutoUpdateEnabled() || !cfg.CacheEnabled() || !cfg.CachePositionEnabled() || !cfg.CacheSizeEnabled() || cfg.CacheEnabledStateEnabled() || !cfg.CacheShowEnabled() || !cfg.CacheAlphaEnabled() {
 				t.Fatalf("test config options = %+v", cfg)
-			}
-			if len(cfg.LeftClick) != 2 || cfg.LeftClick[0] != 0 || cfg.LeftClick[1] != 1 || !cfg.GroupsEnabled() || cfg.Groups == nil || len(*cfg.Groups) != 1 || (*cfg.Groups)[0].Group == nil || (*cfg.Groups)[0].Group.Name != test.groupName || len((*cfg.Groups)[0].Group.Items) != 2 {
-				t.Fatalf("test menu config = %+v", cfg)
 			}
 			data, err := os.ReadFile(path)
 			if err != nil {

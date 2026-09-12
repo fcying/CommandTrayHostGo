@@ -94,7 +94,7 @@ Windows 路径可以使用 `/`, 避免在 JSON 字符串中转义 `\`.
   "lang": "auto",
   "auto_update": false,
   "enable_cache": true,
-  "left_click": [0],
+  "left_click": ["Console"],
   "configs": [
     {
       "name": "Console",
@@ -138,9 +138,9 @@ enabled
 |`lang`|`auto`|空字符串或精确的 `auto` 使用下述自动检测. 精确匹配 `zh-CN`,`zh-Hans`,`zh`,`zh-SG` 时使用简体中文,其他值使用英文. 值区分大小写且不去除首尾空白.|
 |`require_admin`|`false`|启动时通过 UAC 重新运行整个 CommandTrayHostGo.|
 |`start_show_silent`|`true`|受管程序先隐藏启动, 再由窗口控制逻辑应用目标显示状态, 减少窗口闪烁.|
-|`left_click`|`[]`|托盘左键依次切换指定的零基 `configs` 索引,每个索引必须指向已有 entry. 空数组时切换内置 control console.|
+|`left_click`|`[]`|托盘左键依次切换指定 entry,通过精确匹配且区分大小写的 `configs[].name` 引用. 未知名称和数字索引均为配置错误. 空数组时切换内置 control console. entry 重命名时必须同步更新这些引用.|
 |`enable_groups`|`false`|只有为 `true` 且 `groups` 字段存在时,才构造 entry 菜单层级.|
-|`groups`|未设置|菜单项数组; 元素可以是 `configs` 索引或嵌套 group 对象.|
+|`groups`|未设置|菜单项数组; 元素可以是精确匹配且区分大小写的 `configs[].name` 字符串或嵌套 group 对象. 未知名称和数字索引均为配置错误.|
 |`groups_menu_symbol`|`+`|group 子菜单名称前缀.|
 |`cmd_menu_max_length`|`0`|范围 `0..2147483647`. 最多保留 path/cmd 的前 N 个 Unicode 字符,发生截断时再追加 `...`. `0` 表示不截断.|
 |`icon`|内置图标|托盘 `.ico` 文件, 同时应用到内置 control console. 相对路径以 EXE 目录为基准. 提权不会把产品图标替换为 shield icon.|
@@ -242,6 +242,7 @@ enabled
 - 开发构建不会自动检查. 手动检查可以显示最新 release, 但不会声称当前版本可比较.
 - 确认更新后, 客户端下载规范签名 manifest 和更新包, 校验签名及 SHA-256 摘要, 然后替换 EXE 并重启.
 - 重启后的应用等待更新 helper 退出, 再删除 helper EXE 和 `.previous` 备份. 清理错误通过消息框报告.
+- 安装失败时, helper 使用原配置及启动用户 SID 重启仍可用或已成功恢复的旧 EXE. 回滚失败则保留备份, 不启动未经确认的目标; 安装及恢复错误合并报告. 失败事务可能保留临时文件以便恢复.
 - 每次更新在目标目录生成唯一临时 EXE, helper 和备份使用对应的独立路径. 同目录并行实例不共享更新文件, 清理只删除本次事务的文件.
 - 下载和验证在后台执行. 退出或会话关闭会取消操作并丢弃结果, 已取消的下载不会自动安装. 更新交接使用继承进程句柄, 并保留指定配置和原始启动用户 SID.
 
@@ -249,7 +250,7 @@ enabled
 
 |字段|默认值|说明|
 |---|---:|---|
-|`name`|必填|托盘菜单名称,console 初始标题和 cache identity. 不能为空或包含 NUL. 子程序可随后自行修改标题.|
+|`name`|必填|托盘菜单名称,console 初始标题和 cache identity. 不能为空或包含 NUL,且必须在所有 entry 中唯一,包括 disabled entry (区分大小写). entry 重命名时必须同步更新根层级 `left_click` 和所有 `groups` 引用. 唯一性要求仅适用于 `configs[].name`,不适用于 group 标题. 子程序可随后自行修改标题.|
 |`path`|必填|可执行文件基准目录. 绝对路径直接使用; 相对路径以 EXE 目录为基准; 可为空.|
 |`cmd`|必填|命令和参数. 可执行文件部分必须以 `.exe` 结尾. 含空格的可执行文件路径应加双引号.|
 |`working_directory`|必填|空值使用 `path`; 绝对路径直接使用; 普通相对路径相对于 `path`; 以 `>` 开头时相对于 EXE 目录.|
@@ -301,17 +302,17 @@ Windows Terminal 和其他 pseudoconsole 没有可由 child PID 独立控制的�
 
 ## Groups
 
-`groups` 中的整数必须是有效的零基 `configs` 索引. group 对象必须提供 `name`,省略嵌套的 `groups` 数组时为空组. 可以重复引用同一个 entry,最大嵌套深度为 40,包含 group 对象在内的菜单项总数最多 3584. 下例是根层级片段,要求 `configs` 至少包含三个 entry,不是完整配置文件:
+`groups` 中的字符串必须精确匹配已有的 `configs[].name`,区分大小写. 未知名称和数字索引均为配置错误. group 对象必须提供 `name`,省略嵌套的 `groups` 数组时为空组. group 标题不要求全局唯一,可以重复引用同一个 entry. entry 重命名时必须同步更新所有引用. 最大嵌套深度为 40,包含 group 对象在内的菜单项总数最多 3584. 下例是根层级片段,要求 `configs` 包含名为 `Console`,`Editor` 和 `Monitor` 的 entry,不是完整配置文件:
 
 ```jsonc
 {
   "enable_groups": true,
   "groups_menu_symbol": "+",
   "groups": [
-    0,
+    "Console",
     {
       "name": "Tools",
-      "groups": [1, 2]
+      "groups": ["Editor", "Monitor"]
     }
   ]
 }
@@ -383,7 +384,7 @@ Docked Windows 标签依次回退到窗口标题、Win32 class name 和本地化
 
 Start on Boot 写入当前 Windows 用户的 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. 注册项按最终 EXE 路径隔离. 以其他凭据提升后的实例不能修改原用户的 Start on Boot 状态.
 
-Run 项名使用完整 EXE 路径 SHA-256 的紧凑 URL-safe 编码,含前缀共 59 字符. Windows 10 实测发现,80 字符项名虽然能写入注册表,登录时却被忽略. 从旧命名格式升级后,请为需要的实例重新启用开机启动;旧的 80 字符项不会自动转换,可在确认对应 EXE 后清理.
+- Run 项名使用完整 EXE 路径 SHA-256 的紧凑 URL-safe 编码. 打开托盘菜单或启用 Start on Boot 时, 尝试将属于当前实例的旧 `CommandTrayHost_<hash>` 注册项迁移到 `CommandTrayHostGo_<hash>`, 完整保留 Windows `StartupApproved` 状态, 包括禁用状态. 迁移错误会报告, 但不阻断菜单以及对现有注册项的查询和禁用. 命令必须匹配当前 EXE 和配置, 且当前用户必须是原始用户. 不覆盖或删除冲突的其他命令注册项. 禁用会移除新旧命名空间中属于本实例的值及审批记录. 更早的 80 字符命名格式不迁移.
 
 ## 构建
 

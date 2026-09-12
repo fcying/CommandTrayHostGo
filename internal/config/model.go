@@ -24,7 +24,7 @@ type Config struct {
 	ShowHotkeyInMenu      *bool         `json:"show_hotkey_in_menu"`
 	GlobalHotkeyAlphaStep *int64        `json:"global_hotkey_alpha_step"`
 	Hotkey                GlobalHotkeys `json:"hotkey"`
-	LeftClick             []int         `json:"left_click"`
+	LeftClick             []string      `json:"left_click"`
 	EnableGroups          bool          `json:"enable_groups"`
 	Groups                *[]GroupItem  `json:"groups"`
 	GroupsMenuSymbol      *string       `json:"groups_menu_symbol"`
