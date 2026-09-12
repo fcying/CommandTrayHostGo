@@ -18,9 +18,22 @@ import (
 	"github.com/fcying/CommandTrayHostGo/internal/win32"
 )
 
-const applicationName = "CommandTrayHost"
+const applicationName = "CommandTrayHostGo"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--apply-update" {
+		if err := win32.ApplyUpdate(os.Args[1:]); err != nil {
+			win32.ShowError(applicationName, err.Error())
+		}
+		return
+	}
+	if len(os.Args) >= 4 && os.Args[1] == "--finish-update" {
+		if err := win32.FinishUpdate(os.Args[2], os.Args[3]); err != nil {
+			win32.ShowError(applicationName, err.Error())
+		}
+		os.Args = append(os.Args[:1], os.Args[4:]...)
+	}
+
 	if pid, ok := domain.ParseConsoleWindowQueryArgument(os.Args[1:]); ok {
 		var result [8]byte
 		binary.LittleEndian.PutUint64(result[:], uint64(win32.QueryConsoleWindow(pid)))

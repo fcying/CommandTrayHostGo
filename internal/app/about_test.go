@@ -13,9 +13,9 @@ func TestAboutText(t *testing.T) {
 	t.Cleanup(func() {
 		Version, BuildTime = previousVersion, previousBuildTime
 	})
-	text := AboutText("CommandTrayHost", i18n.English)
+	text := AboutText("CommandTrayHostGo", i18n.English)
 	for _, want := range []string{
-		"CommandTrayHost",
+		"CommandTrayHostGo",
 		"Version: v1.2.3",
 		"Revision:",
 		"Author: fcying",
@@ -25,14 +25,14 @@ func TestAboutText(t *testing.T) {
 			t.Fatalf("AboutText() = %q, missing %q", text, want)
 		}
 	}
-	chinese := AboutText("CommandTrayHost", i18n.SimplifiedChinese)
+	chinese := AboutText("CommandTrayHostGo", i18n.SimplifiedChinese)
 	for _, want := range []string{"版本: v1.2.3", "修订:", "作者: fcying", "编译时间: 2026-07-24T12:34:56Z"} {
 		if !strings.Contains(chinese, want) {
 			t.Fatalf("AboutText() = %q, missing %q", chinese, want)
 		}
 	}
 	Version, BuildTime = "development", "unknown"
-	development := AboutText("CommandTrayHost", i18n.SimplifiedChinese)
+	development := AboutText("CommandTrayHostGo", i18n.SimplifiedChinese)
 	if !strings.Contains(development, "版本: 开发版本") || !strings.Contains(development, "编译时间: 未知") {
 		t.Fatalf("AboutText() = %q", development)
 	}

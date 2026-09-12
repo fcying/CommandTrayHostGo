@@ -23,10 +23,10 @@ import (
 
 const (
 	versionCompanyName     = "fcying"
-	versionFileDescription = "CommandTrayHost"
-	versionInternalName    = "CommandTrayHost"
-	versionOriginalName    = "CommandTrayHost.exe"
-	versionProductName     = "CommandTrayHost"
+	versionFileDescription = "CommandTrayHostGo"
+	versionInternalName    = "CommandTrayHostGo"
+	versionOriginalName    = "CommandTrayHostGo.exe"
+	versionProductName     = "CommandTrayHostGo"
 	versionCopyright       = "Copyright (c) 2017 rexdf; Copyright (c) 2026 fcying"
 )
 
@@ -95,7 +95,7 @@ func run(arguments []string) error {
 		return updater.ValidateReleaseVersion(*version)
 	case "package":
 		flags := flag.NewFlagSet("package", flag.ContinueOnError)
-		executable := flags.String("exe", "", "path to CommandTrayHost.exe")
+		executable := flags.String("exe", "", "path to CommandTrayHostGo.exe")
 		license := flags.String("license", "", "path to LICENSE")
 		output := flags.String("out", "", "output ZIP path")
 		modified := flags.String("modified", "", "RFC3339 modification time for ZIP entries")
@@ -115,7 +115,7 @@ func run(arguments []string) error {
 		return updater.CreatePackage(*executable, *license, *output, modifiedTime)
 	case "pe-resources":
 		flags := flag.NewFlagSet("pe-resources", flag.ContinueOnError)
-		executable := flags.String("exe", "", "path to CommandTrayHost.exe")
+		executable := flags.String("exe", "", "path to CommandTrayHostGo.exe")
 		version := flags.String("version", "", "expected version shown by the executable")
 		if err := flags.Parse(arguments[1:]); err != nil {
 			return err

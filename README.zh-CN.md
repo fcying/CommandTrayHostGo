@@ -29,9 +29,9 @@ CommandTrayHostGo 是一个 Windows 托盘进程管理器. 它从 `config.json` 
 
 ## 安装和启动
 
-1. 从 [Releases](https://github.com/fcying/CommandTrayHostGo/releases) 下载 `CommandTrayHost-<version>-windows-amd64.zip`.
+1. 从 [Releases](https://github.com/fcying/CommandTrayHostGo/releases) 下载 `CommandTrayHostGo-<version>-windows-amd64.zip`.
 2. 解压到一个当前用户可写的独立目录.
-3. 运行 `CommandTrayHost.exe`.
+3. 运行 `CommandTrayHostGo.exe`.
 4. 右键托盘图标打开菜单.
 
 首次启动会在 EXE 目录生成 `config.json`. 默认生成两个禁用的测试项:
@@ -50,14 +50,14 @@ CommandTrayHostGo 是一个 Windows 托盘进程管理器. 它从 `config.json` 
 默认配置:
 
 ```powershell
-.\CommandTrayHost.exe
+.\CommandTrayHostGo.exe
 ```
 
 指定配置:
 
 ```powershell
-.\CommandTrayHost.exe -c configs\work.json
-.\CommandTrayHost.exe -c "D:\CTH Config\work.json"
+.\CommandTrayHostGo.exe -c configs\work.json
+.\CommandTrayHostGo.exe -c "D:\CTH Config\work.json"
 ```
 
 规则:
@@ -99,7 +99,7 @@ Windows 路径可以使用 `/`, 避免在 JSON 字符串中转义 `\`.
     {
       "name": "Console",
       "path": "C:/Windows/System32",
-      "cmd": "cmd.exe /d /k echo CommandTrayHost",
+      "cmd": "cmd.exe /d /k echo CommandTrayHostGo",
       "working_directory": "",
       "addition_env_path": "",
       "use_builtin_console": false,
@@ -136,7 +136,7 @@ enabled
 |字段|默认值|说明|
 |---|---:|---|
 |`lang`|`auto`|空字符串或精确的 `auto` 使用下述自动检测. 精确匹配 `zh-CN`,`zh-Hans`,`zh`,`zh-SG` 时使用简体中文,其他值使用英文. 值区分大小写且不去除首尾空白.|
-|`require_admin`|`false`|启动时通过 UAC 重新运行整个 CommandTrayHost.|
+|`require_admin`|`false`|启动时通过 UAC 重新运行整个 CommandTrayHostGo.|
 |`start_show_silent`|`true`|受管程序先隐藏启动, 再由窗口控制逻辑应用目标显示状态, 减少窗口闪烁.|
 |`left_click`|`[]`|托盘左键依次切换指定的零基 `configs` 索引,每个索引必须指向已有 entry. 空数组时切换内置 control console.|
 |`enable_groups`|`false`|只有为 `true` 且 `groups` 字段存在时,才构造 entry 菜单层级.|
@@ -175,7 +175,7 @@ enabled
 - 新配置的 cron、图标、热键和 cache 会先完成 staging; 任何一步失败都会保留当前配置.
 - 新配置要求管理员权限而当前宿主未提权时, 本次 reload 被拒绝.
 - disabled entry 仍执行完整校验; `enabled=false` 不会绕过无效 cron、hotkey 或 groups 配置.
-- 修改 `repeat_mod_hotkey` 需要重启 CommandTrayHost.
+- 修改 `repeat_mod_hotkey` 需要重启 CommandTrayHostGo.
 
 ### 热键
 
@@ -230,17 +230,20 @@ enabled
 
 |字段|默认值|说明|
 |---|---:|---|
-|`auto_update`|`true`|正式、可比较的构建启动后检查 GitHub Release. 自动生成的测试配置显式设置为 `false`.|
-|`skip_prerelease`|`true`|忽略 prerelease.|
+|`auto_update`|`true`|可比较的构建启动后检查 GitHub Release. 自动生成的测试配置显式设置为 `false`.|
+|`skip_prerelease`|`true`|忽略 prerelease. 设为 `false` 时选择最新已签名 prerelease; 只要其 tag 与当前版本不同就安装更新.|
 
-只接受 `v1.2.3`、`v1.2.3-rc.1` 等 SemVer tag. 每个 checker 固定绑定一个通过校验的 `owner/repository` 身份, 并只返回三种明确结果: 当前版本未知、已是最新或存在更新.
+只接受 `v1.2.3`、`v1.2.3-rc.1` 和 `v1.2.3-dev.g<commit>` 等 SemVer tag. 每个 checker 固定绑定一个通过校验的 `owner/repository` 身份, 并只返回三种明确结果: 当前版本未知、已是最新或存在更新.
 
 - 请求仅通过 HTTPS 访问 GitHub Releases API, 最多接受 1 MiB JSON, 并拒绝跳转到 `https://api.github.com` 之外的地址.
-- draft release 和不支持的 tag 会被忽略. `skip_prerelease=true` 时还会先排除 prerelease, 再选择最高 SemVer.
+- draft release 和不支持的 tag 会被忽略. 每次 dev 发布都会删除旧 prerelease. `skip_prerelease=true` 排除 prerelease; 设为 `false` 时选择唯一保留的最新 prerelease, 只要 tag 与当前版本不同就更新.
+- 预发布流程先完整分页获取 Release, 再删除现有 prerelease 及其 tag, 包括重跑时的同提交 tag. 正式 Release 不删除.
 - 传输错误、HTTP 408/5xx 及确认属于限流的 403/429 最多重试五次. 服务端 retry header 优先, 所有等待均可通过 context 取消.
 - 开发构建不会自动检查. 手动检查可以显示最新 release, 但不会声称当前版本可比较.
-- checker 忽略响应提供的 asset URL 和页面 URL, 只使用已校验 repository 和 tag 合成规范 HTTPS release 页面.
-- 不会下载、解压、替换或执行 release asset.
+- 确认更新后, 客户端下载规范签名 manifest 和更新包, 校验签名及 SHA-256 摘要, 然后替换 EXE 并重启.
+- 重启后的应用等待更新 helper 退出, 再删除 helper EXE 和 `.previous` 备份. 清理错误通过消息框报告.
+- 每次更新在目标目录生成唯一临时 EXE, helper 和备份使用对应的独立路径. 同目录并行实例不共享更新文件, 清理只删除本次事务的文件.
+- 下载和验证在后台执行. 退出或会话关闭会取消操作并丢弃结果, 已取消的下载不会自动安装. 更新交接使用继承进程句柄, 并保留指定配置和原始启动用户 SID.
 
 ## Entry 配置字段
 
@@ -252,7 +255,7 @@ enabled
 |`working_directory`|必填|空值使用 `path`; 绝对路径直接使用; 普通相对路径相对于 `path`; 以 `>` 开头时相对于 EXE 目录.|
 |`addition_env_path`|必填|保留字段, 当前没有运行时效果.|
 |`use_builtin_console`|必填|保留字段, 当前没有运行时效果.|
-|`is_gui`|必填|`true` 按 child PID 查找 GUI 窗口, 优先使用无 owner 的标准顶层窗口, 找不到时接受 tool window 或由 CommandTrayHost 拥有的窗口; `false` 通过隔离 helper 关联传统 console 窗口.|
+|`is_gui`|必填|`true` 按 child PID 查找 GUI 窗口, 优先使用无 owner 的标准顶层窗口, 找不到时接受 tool window 或由 CommandTrayHostGo 拥有的窗口; `false` 通过隔离 helper 关联传统 console 窗口.
 |`enabled`|必填|启动时是否运行. Cache 可以按配置覆盖此状态.|
 |`require_admin`|`false`|要求管理员权限. 受管模式要求先提升宿主; fully detached 模式可单独通过 UAC 启动.|
 |`start_show`|见下文|启动后是否显示窗口. 受管 entry 默认 `false`; detached/job-only entry 默认 `true`.|
@@ -370,6 +373,8 @@ second minute hour day-of-month month day-of-week
 - Docked Windows.
 - Exit.
 
+发现兼容的新正式版本时, 检查更新会通过 HTTPS 下载签名 manifest 和更新包, 校验 Ed25519 签名及两个 SHA-256 摘要, 然后退出、替换 EXE 并自动重启. 开发构建的版本不能安全比较, 不会自动安装更新.
+
 单击 entry 的 path 会打开目录; 单击 cmd 会在 Explorer 中定位可执行文件.
 
 启用 cron 的 entry 会在 path 和 cmd 行显示 check mark. 提权后 Elevate 继续显示,其 check mark 表示宿主已经提权.
@@ -397,7 +402,7 @@ just build
 构建结果:
 
 ```text
-dist/windows-amd64/CommandTrayHost.exe
+dist/windows-amd64/CommandTrayHostGo.exe
 ```
 
 构建使用:

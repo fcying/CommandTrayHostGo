@@ -1,6 +1,6 @@
 set shell := ["bash", "-euc"]
 
-name := "CommandTrayHost"
+name := "CommandTrayHostGo"
 out_dir := "dist"
 go_proxy := env_var_or_default("CTH_GOPROXY", "https://proxy.golang.org,direct")
 release_repository := env_var_or_default("CTH_RELEASE_REPOSITORY", "fcying/CommandTrayHostGo")

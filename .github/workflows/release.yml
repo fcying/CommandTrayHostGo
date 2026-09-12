@@ -36,6 +36,8 @@ jobs:
 
       - name: Test, build, and package
         shell: pwsh
+        env:
+          CTH_UPDATE_PRIVATE_KEY: ${{ secrets.CTH_UPDATE_PRIVATE_KEY }}
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           $sourceVersion = (& go run ./cmd/releasetool source-version --source internal/app/about.go).Trim()
@@ -45,13 +47,17 @@ jobs:
             $version = $sourceVersion
             $releaseTag = $sourceVersion
           } else {
-            $version = "dev-$sourceVersion"
-            $releaseTag = "dev"
+            $version = "$sourceVersion-dev.g$($env:GITHUB_SHA.Substring(0, 12))"
+            $releaseTag = $version
           }
-          $packagePath = "release/CommandTrayHost-$version-windows-amd64.zip"
+          $packagePath = "release/CommandTrayHostGo-$version-windows-amd64.zip"
+          $manifestPath = "release/CommandTrayHostGo-$version-update.json"
+          $signaturePath = "$manifestPath.sig"
           "VERSION=$version" >> $env:GITHUB_ENV
           "RELEASE_TAG=$releaseTag" >> $env:GITHUB_ENV
           "PACKAGE_PATH=$packagePath" >> $env:GITHUB_ENV
+          "MANIFEST_PATH=$manifestPath" >> $env:GITHUB_ENV
+          "SIGNATURE_PATH=$signaturePath" >> $env:GITHUB_ENV
 
           go test ./...
           go vet ./...
@@ -62,12 +68,13 @@ jobs:
           $resourcePath = "cmd/commandtrayhost/commandtrayhost_resources_windows_amd64.syso"
           try {
             go run ./cmd/releasetool windows-resource --version $version --manifest cmd/commandtrayhost/commandtrayhost.manifest --icon cmd/commandtrayhost/taskbar.ico --small-icon cmd/commandtrayhost/small.ico --out $resourcePath
-            go build -trimpath -ldflags $ldflags -o release/CommandTrayHost.exe ./cmd/commandtrayhost
+            go build -trimpath -ldflags $ldflags -o release/CommandTrayHostGo.exe ./cmd/commandtrayhost
           } finally {
             Remove-Item $resourcePath -Force -ErrorAction SilentlyContinue
           }
-          go run ./cmd/releasetool pe-resources --exe release/CommandTrayHost.exe --version $version
-          go run ./cmd/releasetool package --exe release/CommandTrayHost.exe --license LICENSE --out $packagePath --modified $buildTime
+          go run ./cmd/releasetool pe-resources --exe release/CommandTrayHostGo.exe --version $version
+          go run ./cmd/releasetool package --exe release/CommandTrayHostGo.exe --license LICENSE --out $packagePath --modified $buildTime
+          go run ./cmd/releasetool manifest --repository $env:GITHUB_REPOSITORY --version $version --package $packagePath --out $manifestPath --signature $signaturePath
 
       - name: Publish release
         shell: pwsh
@@ -75,31 +82,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
-          if ($env:RELEASE_TAG -eq "dev") {
-            $releases = gh release list --limit 100 --json tagName | ConvertFrom-Json
-            if (@($releases).tagName -contains "dev") {
-              gh release delete dev --yes
+          if ($env:VERSION.Contains("-")) {
+            $releasePages = gh api --paginate --slurp "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+            foreach ($page in $releasePages) {
+              foreach ($release in $page) {
+                if ($release.prerelease) {
+                  gh release delete $release.tag_name --yes --cleanup-tag
+                }
+              }
             }
-            $tagRefs = gh api "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/dev" | ConvertFrom-Json
-            if (@($tagRefs).ref -contains "refs/tags/dev") {
-              gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/git/refs/tags/dev"
-            }
-            gh release create dev $env:PACKAGE_PATH `
-              --target $env:GITHUB_SHA `
-              --prerelease `
-              --draft `
-              --title $env:VERSION `
-              --notes "Development build from $env:GITHUB_REF_NAME at $env:GITHUB_SHA."
-          } else {
-            $arguments = @(
-              "release", "create", $env:RELEASE_TAG,
-              $env:PACKAGE_PATH,
-              "--target", $env:GITHUB_SHA,
-              "--generate-notes",
-              "--title", $env:VERSION
-            )
-            if ($env:VERSION.Contains("-")) {
-              $arguments += "--prerelease"
-            }
-            gh @arguments
           }
+          $arguments = @(
+            "release", "create", $env:RELEASE_TAG,
+            $env:PACKAGE_PATH, $env:MANIFEST_PATH, $env:SIGNATURE_PATH,
+            "--target", $env:GITHUB_SHA,
+            "--generate-notes",
+            "--title", $env:VERSION
+          )
+          if ($env:VERSION.Contains("-")) {
+            $arguments += "--prerelease"
+          }
+          gh @arguments

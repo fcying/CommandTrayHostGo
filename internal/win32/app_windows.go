@@ -21,6 +21,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+const productName = "CommandTrayHostGo"
+
 const (
 	wmDestroy                = 0x0002
 	wmClose                  = 0x0010
@@ -412,7 +414,7 @@ func (a *TrayApp) Run() error {
 	}
 	a.icons, err = loadIconResources(a.baseDir, a.config)
 	if err != nil {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 		if a.closing.Load() || a.closed {
 			return nil
 		}
@@ -458,13 +460,13 @@ func (a *TrayApp) Run() error {
 		return fmt.Errorf("CreateWindowExW: %w", err)
 	}
 	if ret, _, callErr := procSetShutdownParams.Call(shutdownPriority, shutdownNoRetry); ret == 0 {
-		ShowError("CommandTrayHost", fmt.Sprintf("SetProcessShutdownParameters: %v", callErr))
+		ShowError(productName, fmt.Sprintf("SetProcessShutdownParameters: %v", callErr))
 		if a.closing.Load() || a.closed {
 			return nil
 		}
 	}
 	if err := a.installInitialHotkeys(); err != nil {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 		if a.closing.Load() || a.closed {
 			return nil
 		}
@@ -480,7 +482,7 @@ func (a *TrayApp) Run() error {
 		return err
 	}
 	if err := a.updateConsoleFallback(); err != nil {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 		if a.closing.Load() || a.closed {
 			return nil
 		}
@@ -494,19 +496,19 @@ func (a *TrayApp) Run() error {
 		return nil
 	}
 	if err := a.updateConfigWatcher(); err != nil {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 		if a.closing.Load() || a.closed {
 			return nil
 		}
 	}
 	if err := a.installInitialCron(time.Now()); err != nil {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 		if a.closing.Load() || a.closed {
 			return nil
 		}
 	}
 	if err := a.startUpdateCheck(false); err != nil {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 	}
 
 	var msg message
@@ -557,7 +559,7 @@ func (a *TrayApp) restoreTrayIcon() {
 		a.trayIconRecovery.reset()
 		err = fmt.Errorf("%w; tray icon retry timer could not be started", err)
 	}
-	ShowError("CommandTrayHost", err.Error())
+	ShowError(productName, err.Error())
 }
 
 func (a *TrayApp) modifyTrayIcon(icon uintptr) error {
@@ -620,7 +622,7 @@ func (a *TrayApp) showMenu() {
 	}
 	defer procDestroyMenu.Call(menu)
 	if err := a.appendConfiguredMenus(menu); err != nil {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 		return
 	}
 	appendMenu(menu, mfSeparator, 0, "")
@@ -642,7 +644,7 @@ func (a *TrayApp) showMenu() {
 	} else {
 		startupEnabled, err := a.startup.Enabled()
 		if err != nil {
-			ShowError("CommandTrayHost", err.Error())
+			ShowError(productName, err.Error())
 			return
 		}
 		if startupEnabled {
@@ -650,7 +652,7 @@ func (a *TrayApp) showMenu() {
 		}
 	}
 	if err := appendMenu(menu, startupFlags, commandStartOnBoot, startupText); err != nil {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 		return
 	}
 	elevateFlags := uintptr(mfString)
@@ -658,12 +660,12 @@ func (a *TrayApp) showMenu() {
 		elevateFlags |= mfChecked
 	}
 	if err := appendMenu(menu, elevateFlags, commandElevate, text.Elevate+a.hotkeyText("hotkey.elevate")); err != nil {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 		return
 	}
 	appendMenu(menu, mfSeparator, 0, "")
 	if err := a.appendHelpMenu(menu); err != nil {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 		return
 	}
 	a.appendDockedMenu(menu)
@@ -884,7 +886,7 @@ func (a *TrayApp) handleLeftClick() {
 	}
 	if len(a.config.LeftClick) == 0 {
 		if err := a.toggleConsoleFallback(); err != nil {
-			ShowError("CommandTrayHost", err.Error())
+			ShowError(productName, err.Error())
 		}
 		return
 	}
@@ -900,7 +902,7 @@ func (a *TrayApp) handleLeftClick() {
 		}
 	}
 	if err := errors.Join(errs...); err != nil {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 	}
 }
 
@@ -932,7 +934,7 @@ func (a *TrayApp) updateConsoleFallback() error {
 		a.resetConsoleWindow()
 		a.console = consoleFallback{}
 	}
-	title := fmt.Sprintf("CommandTrayHost Console %08X", uint32(time.Now().UnixNano()))
+	title := fmt.Sprintf("%s Console %08X", productName, uint32(time.Now().UnixNano()))
 	process, err := a.processes.StartConsoleFallback(title)
 	if err != nil {
 		return err
@@ -961,7 +963,7 @@ func (a *TrayApp) toggleConsoleFallback() error {
 			a.console.findCount = 1
 			a.console.findTimedOut = false
 			a.console.retryWindowAt = time.Time{}
-			return errors.Join(errors.New("ShowWindowAsync failed for CommandTrayHost console"), a.updateWindowTimer())
+			return errors.Join(fmt.Errorf("ShowWindowAsync failed for %s console", productName), a.updateWindowTimer())
 		}
 		a.console.pendingToggle = true
 		a.console.foregroundPending = a.console.targetVisible
@@ -1094,7 +1096,7 @@ func (a *TrayApp) startConfiguredEntries() {
 			continue
 		}
 		if err := a.startEntry(i, true); err != nil {
-			ShowError("CommandTrayHost", err.Error())
+			ShowError(productName, err.Error())
 			if a.closing.Load() || a.closed {
 				return
 			}
@@ -1531,12 +1533,12 @@ func (a *TrayApp) checkConfigReload() {
 	candidate, candidateStamp, err := config.LoadSnapshot(a.configPath)
 	if err != nil {
 		a.observedConfigStamp = stamp
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 		return
 	}
 	if candidate.RequireAdmin && !IsElevated() {
 		a.observedConfigStamp = candidateStamp
-		ShowError("CommandTrayHost", i18n.Text(a.language).ReloadRequiresAdmin)
+		ShowError(productName, i18n.Text(a.language).ReloadRequiresAdmin)
 		return
 	}
 	policy := statecache.DiscardPrevious
@@ -1562,7 +1564,7 @@ func (a *TrayApp) prepareReload(candidate *config.Config, stamp config.FileStamp
 	candidateCron, cronErr := newCronRuntime(*candidate, time.Now())
 	if cronErr != nil {
 		a.observedConfigStamp = stamp
-		ShowError("CommandTrayHost", cronErr.Error())
+		ShowError(productName, cronErr.Error())
 		return
 	}
 	candidateIcons, iconErr := loadIconResources(a.baseDir, *candidate)
@@ -1571,14 +1573,14 @@ func (a *TrayApp) prepareReload(candidate *config.Config, stamp config.FileStamp
 			candidateIcons.Close()
 		}
 		a.observedConfigStamp = stamp
-		ShowError("CommandTrayHost", iconErr.Error())
+		ShowError(productName, iconErr.Error())
 		return
 	}
 	candidateHotkeys, hotkeyErr := a.stageHotkeys(*candidate)
 	if hotkeyErr != nil {
 		candidateIcons.Close()
 		a.observedConfigStamp = stamp
-		ShowError("CommandTrayHost", hotkeyErr.Error())
+		ShowError(productName, hotkeyErr.Error())
 		return
 	}
 	candidateCache, err := statecache.Rebase(a.cachePath, candidate, stamp, a.cache, policy)
@@ -1586,7 +1588,7 @@ func (a *TrayApp) prepareReload(candidate *config.Config, stamp config.FileStamp
 		candidateIcons.Close()
 		a.discardStagedHotkeys(candidateHotkeys)
 		a.observedConfigStamp = stamp
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 		return
 	}
 	matches := domain.MatchReloadEntries(oldConfigs, candidate.Configs)
@@ -1737,7 +1739,7 @@ func (a *TrayApp) rollbackReload() {
 		errs = append(errs, err)
 	}
 	if err := errors.Join(errs...); err != nil && !a.sessionEndPending && !a.closing.Load() {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 	}
 	a.reload = nil
 	if a.closing.Load() || a.closed {
@@ -1909,7 +1911,7 @@ func (a *TrayApp) commitReload() {
 		return
 	}
 	if err := a.updateConfigWatcher(); err != nil {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 		if a.closing.Load() || a.closed {
 			return
 		}
@@ -1921,7 +1923,7 @@ func (a *TrayApp) commitReload() {
 	a.reportWindowTimerError(a.updateWindowTimer())
 	a.resumeCron(time.Now())
 	if err := errors.Join(reload.errs...); err != nil {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 		if a.closing.Load() || a.closed {
 			return
 		}
@@ -1954,7 +1956,7 @@ func (a *TrayApp) stopConfigWatcher() {
 		return
 	}
 	if err := a.watcher.Close(); err != nil && !a.closing.Load() {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 	}
 	a.watcher = nil
 }
@@ -2261,7 +2263,7 @@ func (a *TrayApp) recordConsoleIconFailure(now time.Time, failures *[]string) {
 	}
 	a.console.findTimedOut = true
 	a.console.retryWindowAt = now.Add(windowRetryDelay * time.Millisecond)
-	*failures = append(*failures, fmt.Sprintf("CommandTrayHost console: %v", a.console.iconErr))
+	*failures = append(*failures, fmt.Sprintf("%s console: %v", productName, a.console.iconErr))
 }
 
 func (a *TrayApp) updateWindowTimer() error {
@@ -2362,10 +2364,7 @@ func (a *TrayApp) showWindowDiscoveryError(failures []string) {
 		a.showingWindowError = false
 		a.reportWindowTimerError(a.updateWindowTimer())
 	}()
-	ShowError(
-		"CommandTrayHost",
-		fmt.Sprintf("%s\n%s", i18n.Text(a.language).WindowInitFailedPrefix, strings.Join(failures, "\n")),
-	)
+	ShowError(productName, fmt.Sprintf("%s\n%s", i18n.Text(a.language).WindowInitFailedPrefix, strings.Join(failures, "\n")))
 }
 
 func (a *TrayApp) windowDiscoveryTimeout(name string) string {
@@ -2378,11 +2377,11 @@ func (a *TrayApp) reportWindowTimerError(err error) {
 	}
 	a.showingWindowError = true
 	procKillTimer.Call(a.hwnd, windowTimerID)
-	ShowError("CommandTrayHost", err.Error())
+	ShowError(productName, err.Error())
 	a.showingWindowError = false
 	if retryErr := a.updateWindowTimer(); retryErr != nil {
 		a.showingWindowError = true
-		ShowError("CommandTrayHost", retryErr.Error())
+		ShowError(productName, retryErr.Error())
 		a.showingWindowError = false
 		for i := range a.entries {
 			entry := &a.entries[i]
@@ -2738,7 +2737,7 @@ func (a *TrayApp) handleProcessResults() {
 			a.resumeCron(time.Now())
 			a.resumePendingReload()
 			if err := errors.Join(errs...); err != nil && !a.sessionEndPending {
-				ShowError("CommandTrayHost", err.Error())
+				ShowError(productName, err.Error())
 			}
 			return
 		}
@@ -2775,7 +2774,7 @@ func (a *TrayApp) handleEntryCommand(command uintptr) bool {
 		return false
 	}
 	if err != nil {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 	}
 	return true
 }
@@ -2877,7 +2876,7 @@ func (a *TrayApp) cancelSessionEnd() {
 		}
 	}
 	if err := a.updateConfigWatcher(); err != nil {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 		if a.closing.Load() || a.closed || a.sessionEndPending {
 			return
 		}
@@ -2928,7 +2927,7 @@ func (a *TrayApp) cleanupSessionEnd(timeout time.Duration) {
 	a.suspendCron()
 	a.cron = nil
 	a.unregisterAllHotkeys()
-	a.cancelUpdateCheck()
+	a.cleanupUpdater()
 	for i := range a.entries {
 		a.cacheEntryWindow(i)
 		if a.entries[i].state.Running && !a.entries[i].cronTransient {
@@ -3127,7 +3126,7 @@ func (a *TrayApp) flushCache() error {
 
 func (a *TrayApp) reportCacheError(err error) {
 	if err != nil && !a.sessionEndPending && !a.closing.Load() {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 	}
 }
 
@@ -3212,7 +3211,7 @@ func windowProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 			a.disableAll()
 		case commandEnableAll:
 			if err := a.enableAll(); err != nil {
-				ShowError("CommandTrayHost", err.Error())
+				ShowError(productName, err.Error())
 			}
 		case commandShowAll:
 			a.showAll()
@@ -3220,24 +3219,24 @@ func windowProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 			a.restartAll()
 		case commandElevate:
 			if err := a.elevateHost(); err != nil {
-				ShowError("CommandTrayHost", err.Error())
+				ShowError(productName, err.Error())
 			}
 		case commandShowAllDocked:
 			a.restoreAllDockedWindows()
 		case commandHome:
 			if err := a.openRepositoryPage(); err != nil {
-				ShowError("CommandTrayHost", err.Error())
+				ShowError(productName, err.Error())
 			}
 		case commandCheckForUpdates:
 			if err := a.startUpdateCheck(true); err != nil {
-				ShowInfo("CommandTrayHost", err.Error())
+				ShowInfo(productName, err.Error())
 			}
 		case commandAbout:
 			text := i18n.Text(a.language)
 			ShowInfo(text.About, domain.AboutText(a.config.DisplayName(), a.language))
 		case commandStartOnBoot:
 			if err := a.toggleStartup(); err != nil {
-				ShowError("CommandTrayHost", err.Error())
+				ShowError(productName, err.Error())
 			}
 		case commandExit:
 			procPostMessageW.Call(hwnd, wmClose, 0, 0)
@@ -3275,7 +3274,7 @@ func windowProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 		if a != nil && !a.closing.Load() {
 			a.stopConfigWatcher()
 			if !a.sessionEndPending {
-				ShowError("CommandTrayHost", i18n.Text(a.language).WatcherStopped)
+				ShowError(productName, i18n.Text(a.language).WatcherStopped)
 			}
 		}
 		return 0
@@ -3327,7 +3326,7 @@ func ShowConfirm(title, message string) bool {
 func showReloadConfirm(language i18n.Language, configName string) uintptr {
 	prompt := strings.ReplaceAll(i18n.Text(language).ReloadPrompt, "config.json", configName)
 	return showMessage(
-		"CommandTrayHost",
+		productName,
 		prompt,
 		messageBoxYesNoCancel|messageBoxQuestion,
 	)

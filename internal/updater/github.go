@@ -127,7 +127,7 @@ func (c *Checker) checkOnce(ctx context.Context, options CheckOptions) (Result, 
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
 	request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	request.Header.Set("User-Agent", "CommandTrayHost-Updater")
+	request.Header.Set("User-Agent", "CommandTrayHostGo-Updater")
 	response, err := c.client.Do(request)
 	if err != nil {
 		requestErr := fmt.Errorf("request releases: %w", err)
@@ -169,6 +169,14 @@ func (c *Checker) checkOnce(ctx context.Context, options CheckOptions) (Result, 
 	if !IsComparable(options.CurrentVersion) {
 		return result, nil
 	}
+	if !options.SkipPrereleases && latest.Prerelease {
+		if latest.Tag != options.CurrentVersion {
+			result.Outcome = OutcomeUpdateAvailable
+		} else {
+			result.Outcome = OutcomeUpToDate
+		}
+		return result, nil
+	}
 	currentVersion, _ := ParseVersion(options.CurrentVersion)
 	if Compare(latest.parsedVersion, currentVersion) > 0 {
 		result.Outcome = OutcomeUpdateAvailable
@@ -208,14 +216,12 @@ func (c *Checker) selectLatest(releases []githubRelease, skipPrereleases bool) (
 		if err != nil {
 			continue
 		}
+		candidate := Release{Tag: release.TagName, URL: c.releasesURL + "/tag/" + url.PathEscape(release.TagName), Prerelease: release.Prerelease, parsedVersion: version}
+		if !skipPrereleases && candidate.Prerelease {
+			return candidate, nil
+		}
 		if !found || Compare(version, latest.parsedVersion) > 0 {
-			latest = Release{
-				Tag:           release.TagName,
-				URL:           c.releasesURL + "/tag/" + url.PathEscape(release.TagName),
-				Prerelease:    release.Prerelease,
-				parsedVersion: version,
-			}
-			found = true
+			latest, found = candidate, true
 		}
 	}
 	if !found {

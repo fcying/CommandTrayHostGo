@@ -64,7 +64,7 @@ func (a *TrayApp) stageHotkeys(cfg config.Config) (*pendingHotkeys, error) {
 		return nil, err
 	}
 	if len(a.hotkeys.active) != 0 && len(plan.Bindings) != 0 && plan.NoRepeat != a.hotkeys.noRepeat {
-		return nil, errors.New("repeat_mod_hotkey cannot change during hot reload while hotkeys are active; restart CommandTrayHost")
+		return nil, fmt.Errorf("repeat_mod_hotkey cannot change during hot reload while hotkeys are active; restart %s", productName)
 	}
 	stage := &pendingHotkeys{
 		desired:  make(map[int32]registeredHotkey, len(plan.Bindings)),
@@ -269,7 +269,7 @@ func (a *TrayApp) executeHotkey(action domain.HotkeyAction) {
 		err = a.elevateEntry(action.EntryIndex)
 	}
 	if err != nil {
-		ShowError("CommandTrayHost", err.Error())
+		ShowError(productName, err.Error())
 	}
 }
 
@@ -278,11 +278,11 @@ func (a *TrayApp) elevateHost() error {
 		return nil
 	}
 	if a.hasBusyEntries() {
-		return errors.New("wait for current process operations before elevating CommandTrayHost")
+		return fmt.Errorf("wait for current process operations before elevating %s", productName)
 	}
 	for i := range a.entries {
 		if a.entries[i].state.Running && a.entries[i].ownership == domain.ManagedAndJobOwned {
-			return errors.New("disable managed entries before elevating CommandTrayHost")
+			return fmt.Errorf("disable managed entries before elevating %s", productName)
 		}
 	}
 	executable, err := os.Executable()
@@ -301,7 +301,7 @@ func (a *TrayApp) elevateEntry(index int) error {
 		return nil
 	}
 	if !IsElevated() {
-		return errors.New("elevate CommandTrayHost before running a managed entry as administrator")
+		return fmt.Errorf("elevate %s before running a managed entry as administrator", productName)
 	}
 	entry := &a.entries[index]
 	if entry.busy {

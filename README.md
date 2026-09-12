@@ -29,9 +29,9 @@ Windows x86/386, Windows XP/7/8/8.1, and non-Windows platforms are not supported
 
 ## Install and run
 
-1. Download `CommandTrayHost-<version>-windows-amd64.zip` from [Releases](https://github.com/fcying/CommandTrayHostGo/releases).
+1. Download `CommandTrayHostGo-<version>-windows-amd64.zip` from [Releases](https://github.com/fcying/CommandTrayHostGo/releases).
 2. Extract it to a dedicated directory writable by the current user.
-3. Run `CommandTrayHost.exe`.
+3. Run `CommandTrayHostGo.exe`.
 4. Right-click the tray icon to open the menu.
 
 On first launch, the application creates `config.json` beside the EXE. The generated file contains two disabled test entries:
@@ -50,14 +50,14 @@ Runtime state intentionally lives beside the EXE or selected configuration file.
 Use the default configuration:
 
 ```powershell
-.\CommandTrayHost.exe
+.\CommandTrayHostGo.exe
 ```
 
 Select another configuration:
 
 ```powershell
-.\CommandTrayHost.exe -c configs\work.json
-.\CommandTrayHost.exe -c "D:\CTH Config\work.json"
+.\CommandTrayHostGo.exe -c configs\work.json
+.\CommandTrayHostGo.exe -c "D:\CTH Config\work.json"
 ```
 
 Rules:
@@ -99,7 +99,7 @@ Windows paths may use `/` to avoid escaping `\` in JSON strings.
     {
       "name": "Console",
       "path": "C:/Windows/System32",
-      "cmd": "cmd.exe /d /k echo CommandTrayHost",
+      "cmd": "cmd.exe /d /k echo CommandTrayHostGo",
       "working_directory": "",
       "addition_env_path": "",
       "use_builtin_console": false,
@@ -136,7 +136,7 @@ enabled
 | Field | Default | Description |
 |---|---:|---|
 | `lang` | `auto` | An empty string or exact `auto` uses locale detection below. Exact `zh-CN`, `zh-Hans`, `zh`, and `zh-SG` select Simplified Chinese; other values select English. Values are case-sensitive and are not trimmed. |
-| `require_admin` | `false` | Relaunch the entire CommandTrayHost process through UAC during startup. |
+| `require_admin` | `false` | Relaunch the entire CommandTrayHostGo process through UAC during startup. |
 | `start_show_silent` | `true` | Start managed programs hidden before applying the target window state to reduce visible flashing. |
 | `left_click` | `[]` | Toggle the listed zero-based `configs` indexes on a tray left-click. Every index must refer to an existing entry. An empty array toggles the built-in control console. |
 | `enable_groups` | `false` | Build the entry menu hierarchy only when `true` and `groups` is present. |
@@ -175,7 +175,7 @@ When the configuration timestamp or size changes:
 - Cron, icon, hotkey, and cache changes are staged before commit. Any failure keeps the active configuration unchanged.
 - A reload that newly requires administrator rights is rejected when the host is not elevated.
 - Disabled entries are still fully validated; `enabled=false` does not bypass invalid cron, hotkey, or group configuration.
-- Changing `repeat_mod_hotkey` requires restarting CommandTrayHost.
+- Changing `repeat_mod_hotkey` requires restarting CommandTrayHostGo.
 
 ### Hotkeys
 
@@ -228,17 +228,20 @@ A hotkey cannot be assigned to more than one action.
 
 | Field | Default | Description |
 |---|---:|---|
-| `auto_update` | `true` | Check GitHub Releases at startup for formal, comparable builds. The generated test configuration explicitly sets this to `false`. |
-| `skip_prerelease` | `true` | Ignore prereleases. |
+| `auto_update` | `true` | Check GitHub Releases at startup for comparable builds. The generated test configuration explicitly sets this to `false`. |
+| `skip_prerelease` | `true` | Ignore prereleases. Set to `false` to select the latest signed prerelease; any selected prerelease whose tag differs from the current version is installed. |
 
-Only SemVer tags such as `v1.2.3` and `v1.2.3-rc.1` are accepted. Each checker is bound to one validated `owner/repository` identity and returns one explicit outcome: unknown current version, up to date, or update available.
+Only SemVer tags such as `v1.2.3`, `v1.2.3-rc.1`, and `v1.2.3-dev.g<commit>` are accepted. Each checker is bound to one validated `owner/repository` identity and returns one explicit outcome: unknown current version, up to date, or update available.
 
 - Requests use the GitHub Releases API over HTTPS, accept at most 1 MiB of JSON, and reject redirects outside `https://api.github.com`.
-- Draft releases and unsupported tags are ignored. `skip_prerelease=true` also excludes prereleases before selecting the highest SemVer.
+- Draft releases and unsupported tags are ignored. Each dev publish deletes older prereleases. `skip_prerelease=true` excludes prereleases; setting it to `false` selects the newest remaining prerelease and updates whenever its tag differs from the current version.
+- Prerelease publication enumerates all release pages before deleting existing prereleases and their tags, including the same commit tag on a rerun. Formal releases are retained.
 - Transport errors, HTTP 408/5xx, and confirmed 403/429 rate limits are retried at most five times. Server retry headers take precedence; every wait is context-cancellable.
 - Development builds do not check automatically. A manual check may report the latest release without claiming that the current version is comparable.
-- The checker ignores response-provided asset and page URLs. It only offers a canonical HTTPS release page synthesized from the validated repository and tag.
-- It never downloads, extracts, replaces, or executes release assets.
+- When an update is confirmed, the client downloads the canonical signed manifest and package, verifies their signature and SHA-256 digests, then replaces and restarts the EXE.
+- The restarted application waits for the update helper to exit before removing the helper executable and `.previous` backup. Cleanup errors are shown in a message box.
+- Each update uses a unique temporary executable beside the target, with its own helper and backup paths. Concurrent instances in the same directory do not share update files; cleanup removes only that transaction's files.
+- Downloads and verification run in the background. Exit or session shutdown cancels the operation and discards its result; a canceled download is not installed automatically. Update handoff uses inherited process handles and preserves the selected configuration and original startup user SID.
 
 ## Entry configuration fields
 
@@ -250,7 +253,7 @@ Only SemVer tags such as `v1.2.3` and `v1.2.3-rc.1` are accepted. Each checker i
 | `working_directory` | required | Empty uses `path`; an absolute path is used directly; a normal relative path uses `path`; a leading `>` makes it relative to the EXE directory. |
 | `addition_env_path` | required | Reserved; currently has no runtime effect. |
 | `use_builtin_console` | required | Reserved; currently has no runtime effect. |
-| `is_gui` | required | `true` finds a GUI window by child PID, preferring a standard unowned top-level window and falling back to a tool window or a window owned by CommandTrayHost; `false` uses an isolated helper to associate a traditional console window. |
+| `is_gui` | required | `true` finds a GUI window by child PID, preferring a standard unowned top-level window and falling back to a tool window or a window owned by CommandTrayHostGo; `false` uses an isolated helper to associate a traditional console window. |
 | `enabled` | required | Run the entry at startup. Cache settings may override this state. |
 | `require_admin` | `false` | Require administrator rights. Managed modes require the host to be elevated first; fully detached mode may launch the entry through UAC. |
 | `start_show` | see below | Show the window after startup. Managed entries default to `false`; detached and job-only entries default to `true`. |
@@ -368,6 +371,8 @@ The right-click menu contains:
 - Docked Windows.
 - Exit.
 
+When a newer compatible release is available, Check for Updates downloads its signed manifest and package over HTTPS, verifies the Ed25519 signature and both SHA-256 digests, then exits, replaces the EXE, and restarts. Development builds are never installed automatically because their version cannot be compared safely.
+
 Selecting an entry path opens its directory. Selecting its cmd locates the executable in Explorer.
 
 An enabled cron configuration marks the entry's path and cmd rows with check marks. Elevate remains visible after elevation; its check mark indicates that the host is already elevated.
@@ -395,7 +400,7 @@ just build
 Build output:
 
 ```text
-dist/windows-amd64/CommandTrayHost.exe
+dist/windows-amd64/CommandTrayHostGo.exe
 ```
 
 The build uses:

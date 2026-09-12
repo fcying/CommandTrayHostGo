@@ -29,7 +29,7 @@ func TestNewCheckerValidatesRepositoryAndBuildsTrustedPages(t *testing.T) {
 
 func TestCheckerSelectsHighestCompatibleRelease(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.Header.Get("Accept") != "application/vnd.github+json" || request.Header.Get("X-GitHub-Api-Version") != "2022-11-28" || request.Header.Get("User-Agent") != "CommandTrayHost-Updater" {
+		if request.Header.Get("Accept") != "application/vnd.github+json" || request.Header.Get("X-GitHub-Api-Version") != "2022-11-28" || request.Header.Get("User-Agent") != "CommandTrayHostGo-Updater" {
 			t.Errorf("request headers = %+v", request.Header)
 		}
 		writeJSON(response, `[
@@ -57,6 +57,23 @@ func TestCheckerSelectsHighestCompatibleRelease(t *testing.T) {
 	}
 	if preview.Outcome != OutcomeUpdateAvailable || preview.Latest.Tag != "v1.3.0-rc.1" || !preview.Latest.Prerelease {
 		t.Fatalf("preview result = %+v", preview)
+	}
+}
+
+func TestCheckerUpdatesToDifferentSelectedPrerelease(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		writeJSON(response, `[{"tag_name":"v1.0.0-dev.2","draft":false,"prerelease":true},{"tag_name":"v2.0.0","draft":false,"prerelease":false}]`)
+	}))
+	defer server.Close()
+	checker := checkerForServer(t, server)
+	for _, test := range []struct {
+		current string
+		outcome Outcome
+	}{{"v1.0.0-dev.1", OutcomeUpdateAvailable}, {"v1.0.0-dev.2", OutcomeUpToDate}} {
+		result, err := checker.Check(context.Background(), CheckOptions{CurrentVersion: test.current})
+		if err != nil || result.Latest.Tag != "v1.0.0-dev.2" || result.Outcome != test.outcome {
+			t.Fatalf("Check(%q) = %+v, %v", test.current, result, err)
+		}
 	}
 }
 
