@@ -888,13 +888,19 @@ func (a *TrayApp) handleLeftClick() {
 		}
 		return
 	}
+	var errs []error
 	for _, index := range a.config.LeftClick {
 		if index >= 0 && index < len(a.entries) {
-			a.toggleEntryWindow(index)
+			if err := a.toggleEntryWindow(index); err != nil {
+				errs = append(errs, err)
+			}
 			if a.closing.Load() || a.closed || a.closePending {
 				return
 			}
 		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		ShowError("CommandTrayHost", err.Error())
 	}
 }
 
@@ -2050,31 +2056,30 @@ func (a *TrayApp) discoverWindows() {
 						entry.appearanceErr = nil
 					}
 				}
-				if entry.showPending && (!entry.findTimedOut || !now.Before(entry.retryWindowAt)) {
-					if showWindow(entry.hwnd, entry.state.Show) {
-						entry.showPending = isWindowVisible(entry.hwnd) != entry.state.Show
-						if entry.showPending {
-							a.recordWindowFindFailure(entry, nil, now, &timedOut)
-						} else if !entry.appearancePending && !entry.iconPending {
-							entry.findCount = 0
-							entry.findTimedOut = false
-							entry.retryWindowAt = time.Time{}
-							entry.appearanceErr = nil
-						}
-					} else {
-						a.recordWindowFindFailure(entry, errors.New("ShowWindowAsync failed"), now, &timedOut)
+				if entry.showPending && (!entry.state.Show || !entry.appearancePending) && (!entry.findTimedOut || !now.Before(entry.retryWindowAt)) {
+					showWindow(entry.hwnd, entry.state.Show)
+					entry.showPending = isWindowVisible(entry.hwnd) != entry.state.Show
+					if entry.showPending {
+						a.recordWindowFindFailure(entry, nil, now, &timedOut)
+					} else if !entry.appearancePending && !entry.iconPending {
+						entry.findCount = 0
+						entry.findTimedOut = false
+						entry.retryWindowAt = time.Time{}
+						entry.appearanceErr = nil
 					}
 				}
 				visible := isWindowVisible(entry.hwnd)
 				if !entry.showPending {
 					entry.state.Show = visible
 				}
-				if entry.foregroundPending && visible {
+				if entry.foregroundPending && visible && !entry.appearancePending {
 					procSetForegroundWnd.Call(entry.hwnd)
 					entry.foregroundPending = false
 				}
 				entry.needsWindow = false
-				a.cacheEntryWindow(i)
+				if !entry.appearancePending {
+					a.cacheEntryWindow(i)
+				}
 				continue
 			}
 			entry.hwnd = 0
@@ -2088,12 +2093,13 @@ func (a *TrayApp) discoverWindows() {
 				}
 			}
 			entry.retainedIconHWND = 0
-			entry.needsWindow = entryNeedsWindow(entry.config, entry.state.Show) || entry.iconPending || entry.appearancePending
+			pendingShow := entry.showPending
+			entry.needsWindow = entryNeedsWindow(entry.config, entry.state.Show) || entry.iconPending || entry.appearancePending || pendingShow
 			entry.findCount = 0
 			entry.findTimedOut = false
 			entry.retryWindowAt = time.Time{}
-			entry.showPending = false
-			entry.foregroundPending = false
+			entry.showPending = pendingShow
+			entry.foregroundPending = entry.config.IsGUI && entry.state.Show && entry.foregroundPending
 		}
 		if !entry.needsWindow {
 			continue
@@ -2107,7 +2113,7 @@ func (a *TrayApp) discoverWindows() {
 				a.recordWindowFindFailure(entry, nil, now, &timedOut)
 				continue
 			}
-			a.completeWindowDiscovery(i, now, &timedOut)
+			a.completeWindowDiscovery(i, now, &timedOut, true)
 			continue
 		}
 		targetPIDs[entry.process.pid] = struct{}{}
@@ -2143,7 +2149,7 @@ func (a *TrayApp) discoverWindows() {
 					a.recordWindowFindFailure(entry, nil, now, &timedOut)
 					continue
 				}
-				a.completeWindowDiscovery(i, now, &timedOut)
+				a.completeWindowDiscovery(i, now, &timedOut, true)
 			}
 		}
 	}
@@ -2153,10 +2159,14 @@ func (a *TrayApp) discoverWindows() {
 	a.showWindowDiscoveryError(timedOut)
 }
 
-func (a *TrayApp) completeWindowDiscovery(index int, now time.Time, failures *[]string) {
+func (a *TrayApp) completeWindowDiscovery(index int, now time.Time, failures *[]string, applyAppearance bool) {
 	entry := &a.entries[index]
-	appearanceErr := applyWindowAppearance(entry.hwnd, entry.config)
-	entry.appearancePending = appearanceErr != nil
+	entry.showPending = true
+	var appearanceErr error
+	if applyAppearance {
+		appearanceErr = applyWindowAppearance(entry.hwnd, entry.config)
+		entry.appearancePending = appearanceErr != nil
+	}
 	var iconErr error
 	if entry.iconPending {
 		iconErr = applyDesiredWindowIcons(entry.hwnd, a.desiredEntryIcons(index), &entry.retainedIcons, &entry.retainedIconHWND)
@@ -2171,11 +2181,18 @@ func (a *TrayApp) completeWindowDiscovery(index int, now time.Time, failures *[]
 	} else {
 		entry.appearanceErr = nil
 	}
-	if !showWindow(entry.hwnd, entry.state.Show) {
-		entry.showPending = true
-		a.recordWindowFindFailure(entry, errors.New("ShowWindowAsync failed"), now, failures)
+	showWindow(entry.hwnd, entry.state.Show)
+	if isWindowVisible(entry.hwnd) != entry.state.Show {
+		entry.needsWindow = false
 		return
 	}
+
+	entry.showPending = false
+	if entry.foregroundPending && entry.state.Show && !entry.appearancePending {
+		procSetForegroundWnd.Call(entry.hwnd)
+		entry.foregroundPending = false
+	}
+
 	if entry.state.Show && entry.config.Topmost {
 		if err := setWindowTopmost(entry.hwnd); err != nil {
 			entry.appearancePending = true
@@ -2189,7 +2206,6 @@ func (a *TrayApp) completeWindowDiscovery(index int, now time.Time, failures *[]
 		entry.findTimedOut = false
 		entry.retryWindowAt = time.Time{}
 	}
-	entry.showPending = true
 }
 
 func (a *TrayApp) recordWindowFindFailure(entry *trayEntry, appearanceErr error, now time.Time, failures *[]string) {
@@ -2259,6 +2275,7 @@ func (a *TrayApp) updateWindowTimer() error {
 	if a.showingWindowError {
 		return nil
 	}
+	now := time.Now()
 	var delay time.Duration
 	found := false
 	if a.console.process != nil && (a.console.pendingToggle || a.console.foregroundPending || a.console.iconPending) {
@@ -2276,37 +2293,8 @@ func (a *TrayApp) updateWindowTimer() error {
 		if !entry.state.Running || entry.ownership != domain.ManagedAndJobOwned || entry.process == nil {
 			continue
 		}
-		var entryDelay time.Duration
-		switch {
-		case entry.showPending && entry.findTimedOut:
-			entryDelay = time.Until(entry.retryWindowAt)
-			if entryDelay <= 0 {
-				entryDelay = time.Millisecond
-			}
-		case entry.showPending || entry.foregroundPending:
-			entryDelay = windowTimerDelay * time.Millisecond
-		case entry.appearancePending && entry.findTimedOut:
-			entryDelay = time.Until(entry.retryWindowAt)
-			if entryDelay <= 0 {
-				entryDelay = time.Millisecond
-			}
-		case entry.appearancePending:
-			entryDelay = windowTimerDelay * time.Millisecond
-		case entry.iconPending && entry.findTimedOut:
-			entryDelay = time.Until(entry.retryWindowAt)
-			if entryDelay <= 0 {
-				entryDelay = time.Millisecond
-			}
-		case entry.iconPending:
-			entryDelay = windowTimerDelay * time.Millisecond
-		case entry.needsWindow && entry.hwnd == 0 && entry.findTimedOut:
-			entryDelay = time.Until(entry.retryWindowAt)
-			if entryDelay <= 0 {
-				entryDelay = time.Millisecond
-			}
-		case entry.needsWindow && entry.hwnd == 0:
-			entryDelay = windowTimerDelay * time.Millisecond
-		default:
+		entryDelay, active := entryWindowTimerDelay(entry, now)
+		if !active {
 			continue
 		}
 		if !found || entryDelay < delay {
@@ -2323,6 +2311,45 @@ func (a *TrayApp) updateWindowTimer() error {
 	}
 	procKillTimer.Call(a.hwnd, windowTimerID)
 	return nil
+}
+
+func entryWindowTimerDelay(entry *trayEntry, now time.Time) (time.Duration, bool) {
+	switch {
+	case entry.needsWindow && entry.hwnd == 0 && entry.findTimedOut:
+		delay := entry.retryWindowAt.Sub(now)
+		if delay <= 0 {
+			delay = time.Millisecond
+		}
+		return delay, true
+	case entry.showPending && entry.findTimedOut:
+		delay := entry.retryWindowAt.Sub(now)
+		if delay <= 0 {
+			delay = time.Millisecond
+		}
+		return delay, true
+	case entry.appearancePending && entry.findTimedOut:
+		delay := entry.retryWindowAt.Sub(now)
+		if delay <= 0 {
+			delay = time.Millisecond
+		}
+		return delay, true
+	case entry.iconPending && entry.findTimedOut:
+		delay := entry.retryWindowAt.Sub(now)
+		if delay <= 0 {
+			delay = time.Millisecond
+		}
+		return delay, true
+	case entry.showPending || entry.foregroundPending:
+		return windowTimerDelay * time.Millisecond, true
+	case entry.appearancePending:
+		return windowTimerDelay * time.Millisecond, true
+	case entry.iconPending:
+		return windowTimerDelay * time.Millisecond, true
+	case entry.needsWindow && entry.hwnd == 0:
+		return windowTimerDelay * time.Millisecond, true
+	default:
+		return 0, false
+	}
 }
 
 func (a *TrayApp) showWindowDiscoveryError(failures []string) {
@@ -2368,12 +2395,47 @@ func (a *TrayApp) reportWindowTimerError(err error) {
 	}
 }
 
-func (a *TrayApp) toggleEntryWindow(index int) {
+func (a *TrayApp) toggleEntryWindow(index int) error {
 	entry := &a.entries[index]
 	if entry.busy || !entry.state.Running || entry.ownership != domain.ManagedAndJobOwned {
-		return
+		return nil
+	}
+	if !entryOwnsWindow(entry, entry.hwnd) {
+		hwnd, err := findEntryWindow(entry)
+		if err != nil {
+			return err
+		}
+		if hwnd == 0 {
+			if !entry.config.IsGUI && !entry.state.Show {
+				return nil
+			}
+		} else {
+			entry.hwnd = hwnd
+			entry.appearancePending = hasWindowGeometryAppearance(entry.config)
+			entry.iconPending = entry.config.Icon != "" && a.desiredEntryIcons(index) != nil
+			entry.findCount = 0
+			entry.findTimedOut = false
+			entry.retryWindowAt = time.Time{}
+			entry.appearanceErr = nil
+			entry.showPending = false
+		}
 	}
 	a.setEntryWindowVisible(index, !entry.state.Show, true)
+	return nil
+}
+
+func findEntryWindow(entry *trayEntry) (uintptr, error) {
+	if entry == nil || entry.process == nil {
+		return 0, nil
+	}
+	if !entry.config.IsGUI {
+		return entry.process.consoleWindow(), nil
+	}
+	windowsByPID, err := findWindows(map[uint32]struct{}{entry.process.pid: {}})
+	if err != nil {
+		return 0, err
+	}
+	return windowsByPID[entry.process.pid], nil
 }
 
 func (a *TrayApp) setEntryWindowVisible(index int, visible, foreground bool) {
@@ -2381,7 +2443,17 @@ func (a *TrayApp) setEntryWindowVisible(index int, visible, foreground bool) {
 	if entry.busy || !entry.state.Running || entry.ownership != domain.ManagedAndJobOwned {
 		return
 	}
-	a.cacheEntryWindow(index)
+	initializeWindow := entry.appearancePending || entry.iconPending
+	wasVisible := entry.state.Show
+	if wasVisible != visible {
+		entry.findCount = 0
+		entry.findTimedOut = false
+		entry.retryWindowAt = time.Time{}
+		entry.appearanceErr = nil
+	}
+	if !entry.appearancePending {
+		a.cacheEntryWindow(index)
+	}
 	entry.state.Show = visible
 	entry.cronTransient = false
 	a.updateCachedState(index)
@@ -2390,30 +2462,30 @@ func (a *TrayApp) setEntryWindowVisible(index int, visible, foreground bool) {
 		entry.hwnd = 0
 		entry.appearancePending = hasWindowGeometryAppearance(entry.config)
 		entry.iconPending = entry.config.Icon != "" && a.desiredEntryIcons(index) != nil
-		entry.needsWindow = true
+		entry.needsWindow = entryNeedsWindow(entry.config, visible) || entry.iconPending || entry.appearancePending || (entry.config.IsGUI && wasVisible)
 		entry.findCount = 0
 		entry.findTimedOut = false
 		entry.retryWindowAt = time.Time{}
 		entry.appearanceErr = nil
 		entry.showPending = false
-		entry.foregroundPending = false
+		entry.foregroundPending = entry.config.IsGUI && visible && foreground
 		a.reportWindowTimerError(a.updateWindowTimer())
 		return
 	}
-	var started bool
+	if initializeWindow {
+		entry.foregroundPending = visible && foreground
+		var failures []string
+		a.completeWindowDiscovery(index, time.Now(), &failures, entry.appearancePending)
+		if err := a.updateWindowTimer(); err != nil {
+			failures = append(failures, err.Error())
+		}
+		a.showWindowDiscoveryError(failures)
+		return
+	}
 	if visible && !foreground {
-		ret, _, _ := procShowWindowAsync.Call(entry.hwnd, windows.SW_SHOWNA)
-		started = ret != 0
+		procShowWindowAsync.Call(entry.hwnd, windows.SW_SHOWNA)
 	} else {
-		started = showWindow(entry.hwnd, visible)
-	}
-	if !started {
-		entry.needsWindow = false
-		entry.showPending = true
-		entry.foregroundPending = false
-		entry.appearanceErr = errors.New("ShowWindowAsync failed")
-		a.reportWindowTimerError(a.updateWindowTimer())
-		return
+		showWindow(entry.hwnd, visible)
 	}
 	if visible && entry.config.Topmost {
 		if err := setWindowTopmost(entry.hwnd); err != nil {
@@ -2692,7 +2764,7 @@ func (a *TrayApp) handleEntryCommand(command uintptr) bool {
 	case commandSelectExecutable:
 		err = a.selectEntryExecutable(index)
 	case commandShowHide:
-		a.toggleEntryWindow(index)
+		err = a.toggleEntryWindow(index)
 	case commandToggle:
 		err = a.toggleEntry(index)
 	case commandRestart:

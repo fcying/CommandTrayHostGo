@@ -1,6 +1,6 @@
 module github.com/fcying/CommandTrayHostGo
 
-go 1.26
+go 1.27
 
 require (
 	github.com/tailscale/hujson v0.0.0-20260722022634-78b5b162ee49

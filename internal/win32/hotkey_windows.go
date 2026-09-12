@@ -252,7 +252,7 @@ func (a *TrayApp) executeHotkey(action domain.HotkeyAction) {
 		a.restoreAllDockedWindows()
 	case domain.HotkeyEntryHideShow:
 		if action.EntryIndex >= 0 && action.EntryIndex < len(a.entries) {
-			a.toggleEntryWindow(action.EntryIndex)
+			err = a.toggleEntryWindow(action.EntryIndex)
 		}
 	case domain.HotkeyEntryDisableEnable:
 		if action.EntryIndex >= 0 && action.EntryIndex < len(a.entries) {
