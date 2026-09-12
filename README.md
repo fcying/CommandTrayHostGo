@@ -94,7 +94,7 @@ Windows paths may use `/` to avoid escaping `\` in JSON strings.
   "lang": "auto",
   "auto_update": false,
   "enable_cache": true,
-  "left_click": [0],
+  "left_click": ["Console"],
   "configs": [
     {
       "name": "Console",
@@ -138,9 +138,9 @@ enabled
 | `lang` | `auto` | An empty string or exact `auto` uses locale detection below. Exact `zh-CN`, `zh-Hans`, `zh`, and `zh-SG` select Simplified Chinese; other values select English. Values are case-sensitive and are not trimmed. |
 | `require_admin` | `false` | Relaunch the entire CommandTrayHostGo process through UAC during startup. |
 | `start_show_silent` | `true` | Start managed programs hidden before applying the target window state to reduce visible flashing. |
-| `left_click` | `[]` | Toggle the listed zero-based `configs` indexes on a tray left-click. Every index must refer to an existing entry. An empty array toggles the built-in control console. |
+| `left_click` | `[]` | Toggle the listed entries on a tray left-click, using exact, case-sensitive `configs[].name` references. Unknown names and numeric indexes are configuration errors. An empty array toggles the built-in control console. Update these references whenever an entry is renamed. |
 | `enable_groups` | `false` | Build the entry menu hierarchy only when `true` and `groups` is present. |
-| `groups` | unset | Menu items containing `configs` indexes or nested group objects. |
+| `groups` | unset | Menu items containing exact, case-sensitive `configs[].name` strings or nested group objects. Unknown names and numeric indexes are configuration errors. |
 | `groups_menu_symbol` | `+` | Prefix displayed before group submenu names. |
 | `cmd_menu_max_length` | `0` | Range `0..2147483647`. Keep at most this many Unicode characters from path/cmd text, then append `...` if truncated. `0` disables truncation. |
 | `icon` | built-in icon | Tray `.ico` file, also applied to the built-in control console. Relative paths use the EXE directory. Elevation does not replace the product icon with a shield icon. |
@@ -240,6 +240,7 @@ Only SemVer tags such as `v1.2.3`, `v1.2.3-rc.1`, and `v1.2.3-dev.g<commit>` are
 - Development builds do not check automatically. A manual check may report the latest release without claiming that the current version is comparable.
 - When an update is confirmed, the client downloads the canonical signed manifest and package, verifies their signature and SHA-256 digests, then replaces and restarts the EXE.
 - The restarted application waits for the update helper to exit before removing the helper executable and `.previous` backup. Cleanup errors are shown in a message box.
+- If installation fails, the helper restarts the existing or successfully restored previous executable with the original configuration and startup user SID. Failed rollback preserves the backup and does not launch an unverified target; installation and recovery errors are reported together. Failed transactions may retain their temporary files for recovery.
 - Each update uses a unique temporary executable beside the target, with its own helper and backup paths. Concurrent instances in the same directory do not share update files; cleanup removes only that transaction's files.
 - Downloads and verification run in the background. Exit or session shutdown cancels the operation and discards its result; a canceled download is not installed automatically. Update handoff uses inherited process handles and preserves the selected configuration and original startup user SID.
 
@@ -247,7 +248,7 @@ Only SemVer tags such as `v1.2.3`, `v1.2.3-rc.1`, and `v1.2.3-dev.g<commit>` are
 
 | Field | Default | Description |
 |---|---:|---|
-| `name` | required | Tray menu label, initial console title, and cache identity. Must not be empty or contain NUL. Child programs may subsequently change their own title. |
+| `name` | required | Tray menu label, initial console title, and cache identity. Must not be empty or contain NUL, and must be unique across all entries, including disabled entries (case-sensitive). Renaming an entry requires updating its root `left_click` and all `groups` references. This uniqueness rule applies only to `configs[].name`, not group titles. Child programs may subsequently change their own title. |
 | `path` | required | Executable base directory. Absolute paths are used directly; relative paths use the EXE directory; may be empty. |
 | `cmd` | required | Command and arguments. The executable portion must end in `.exe`. Quote executable paths containing spaces. |
 | `working_directory` | required | Empty uses `path`; an absolute path is used directly; a normal relative path uses `path`; a leading `>` makes it relative to the EXE directory. |
@@ -299,17 +300,17 @@ Normal managed processes are created suspended and resumed only after successful
 
 ## Groups
 
-Integers in `groups` must be valid zero-based `configs` indexes. A group object requires `name`; omitting its nested `groups` array creates an empty group. The same entry may appear more than once. Maximum nesting depth is 40, with at most 3584 menu items including group objects. The following root-level fragment requires at least three entries in `configs`; it is not a complete configuration:
+Strings in `groups` must exactly match an existing `configs[].name`, including case. Unknown names and numeric indexes are configuration errors. A group object requires `name`; omitting its nested `groups` array creates an empty group. Group titles need not be globally unique, and the same entry may appear more than once. Update all references when an entry is renamed. Maximum nesting depth is 40, with at most 3584 menu items including group objects. The following root-level fragment requires entries named `Console`, `Editor`, and `Monitor` in `configs`; it is not a complete configuration:
 
 ```jsonc
 {
   "enable_groups": true,
   "groups_menu_symbol": "+",
   "groups": [
-    0,
+    "Console",
     {
       "name": "Tools",
-      "groups": [1, 2]
+      "groups": ["Editor", "Monitor"]
     }
   ]
 }
@@ -381,7 +382,7 @@ Docked Windows labels use the window caption, then the Win32 class name, then th
 
 Start on Boot writes to `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` for the current Windows user. Registrations are isolated by final EXE path. An instance elevated with different credentials cannot modify the original user's Start on Boot state.
 
-Run value names use a compact, URL-safe encoding of the full executable-path SHA-256 hash (59 characters including the prefix). Windows 10 testing found that 80-character value names were stored successfully but ignored at logon. After upgrading from the old naming format, enable Start on Boot again for each desired instance; old 80-character values are not automatically converted and may be removed after checking their target EXE.
+- Run value names use a compact, URL-safe encoding of the full executable-path SHA-256 hash. Opening the tray menu or enabling Start on Boot attempts to migrate an owned legacy `CommandTrayHost_<hash>` registration to `CommandTrayHostGo_<hash>`, preserving its complete Windows `StartupApproved` state, including disabled status. Migration errors are reported without blocking the menu or querying and disabling the existing registration. The command must match the current executable and configuration, and the original user must be current. Conflicting foreign values are not overwritten or removed. Disabling removes both owned namespaces and their approval records. Older 80-character naming formats are not migrated.
 
 ## Build
 

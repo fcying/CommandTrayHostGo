@@ -15,8 +15,8 @@ const (
 )
 
 type GroupItem struct {
-	EntryIndex *int
-	Group      *Group
+	EntryName *string
+	Group     *Group
 }
 
 type Group struct {
@@ -27,21 +27,21 @@ type Group struct {
 func (item *GroupItem) UnmarshalJSON(data []byte) error {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
-		return errors.New("must be a configs index or group object")
+		return errors.New("must be a configs name or group object")
 	}
 	if data[0] != '{' {
-		var index int
-		if err := json.Unmarshal(data, &index); err != nil {
-			return errors.New("must be a non-negative integer or group object")
+		var name string
+		if err := json.Unmarshal(data, &name); err != nil {
+			return errors.New("must be a configs name or group object")
 		}
-		item.EntryIndex = &index
+		item.EntryName = &name
 		item.Group = nil
 		return nil
 	}
 
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(data, &object); err != nil {
-		return errors.New("must be a configs index or group object")
+		return errors.New("must be a configs name or group object")
 	}
 	rawName, ok := findJSONField(object, "name")
 	if !ok {
@@ -64,17 +64,17 @@ func (item *GroupItem) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("group groups must be an array: %w", err)
 		}
 	}
-	item.EntryIndex = nil
+	item.EntryName = nil
 	item.Group = &Group{Name: name, Items: items}
 	return nil
 }
 
-func validateGroups(items []GroupItem, configCount int) error {
+func validateGroups(items []GroupItem, names map[string]int) error {
 	count := 0
-	return validateGroupItems(items, configCount, "groups", 0, &count)
+	return validateGroupItems(items, names, "groups", 0, &count)
 }
 
-func validateGroupItems(items []GroupItem, configCount int, path string, parentDepth int, count *int) error {
+func validateGroupItems(items []GroupItem, names map[string]int, path string, parentDepth int, count *int) error {
 	for i, item := range items {
 		(*count)++
 		if *count > maxGroupItems {
@@ -82,30 +82,29 @@ func validateGroupItems(items []GroupItem, configCount int, path string, parentD
 		}
 		itemPath := fmt.Sprintf("%s[%d]", path, i)
 		switch {
-		case item.EntryIndex != nil:
-			if *item.EntryIndex < 0 || *item.EntryIndex >= configCount {
-				return fmt.Errorf("%s must reference a configs index", itemPath)
+		case item.EntryName != nil:
+			if _, exists := names[*item.EntryName]; !exists {
+				return fmt.Errorf("%s must reference an existing configs name: %q", itemPath, *item.EntryName)
 			}
 		case item.Group != nil:
 			depth := parentDepth + 1
 			if depth > maxGroupDepth {
 				return fmt.Errorf("%s exceeds the maximum group depth of %d", itemPath, maxGroupDepth)
 			}
-			if err := validateGroupItems(item.Group.Items, configCount, itemPath+".groups", depth, count); err != nil {
+			if err := validateGroupItems(item.Group.Items, names, itemPath+".groups", depth, count); err != nil {
 				return err
 			}
 		default:
-			return fmt.Errorf("%s must be a configs index or group object", itemPath)
+			return fmt.Errorf("%s must be a configs name or group object", itemPath)
 		}
 	}
 	return nil
 }
 
-func validateGroupsJSON(raw json.RawMessage, configCount int) error {
+func validateGroupsJSON(raw json.RawMessage) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
 	count := 0
-	if err := validateGroupArrayJSON(decoder, configCount, "groups", 0, &count); err != nil {
+	if err := validateGroupArrayJSON(decoder, "groups", 0, &count); err != nil {
 		return err
 	}
 	if token, err := decoder.Token(); !errors.Is(err, io.EOF) {
@@ -117,7 +116,7 @@ func validateGroupsJSON(raw json.RawMessage, configCount int) error {
 	return nil
 }
 
-func validateGroupArrayJSON(decoder *json.Decoder, configCount int, path string, parentDepth int, count *int) error {
+func validateGroupArrayJSON(decoder *json.Decoder, path string, parentDepth int, count *int) error {
 	token, err := decoder.Token()
 	if err != nil {
 		return fmt.Errorf("%s must be an array", path)
@@ -136,20 +135,16 @@ func validateGroupArrayJSON(decoder *json.Decoder, configCount int, path string,
 			return fmt.Errorf("%s: %w", itemPath, err)
 		}
 		switch value := itemToken.(type) {
-		case json.Number:
-			entryIndex, err := value.Int64()
-			if err != nil || entryIndex < 0 || entryIndex >= int64(configCount) {
-				return fmt.Errorf("%s must reference a configs index", itemPath)
-			}
+		case string:
 		case json.Delim:
 			if value != '{' {
-				return fmt.Errorf("%s must be a configs index or group object", itemPath)
+				return fmt.Errorf("%s must be a configs name or group object", itemPath)
 			}
-			if err := validateGroupObjectJSON(decoder, configCount, itemPath, parentDepth+1, count); err != nil {
+			if err := validateGroupObjectJSON(decoder, itemPath, parentDepth+1, count); err != nil {
 				return err
 			}
 		default:
-			return fmt.Errorf("%s must be a configs index or group object", itemPath)
+			return fmt.Errorf("%s must be a configs name or group object", itemPath)
 		}
 	}
 	if _, err := decoder.Token(); err != nil {
@@ -158,7 +153,7 @@ func validateGroupArrayJSON(decoder *json.Decoder, configCount int, path string,
 	return nil
 }
 
-func validateGroupObjectJSON(decoder *json.Decoder, configCount int, path string, depth int, count *int) error {
+func validateGroupObjectJSON(decoder *json.Decoder, path string, depth int, count *int) error {
 	if depth > maxGroupDepth {
 		return fmt.Errorf("%s exceeds the maximum group depth of %d", path, maxGroupDepth)
 	}
@@ -191,7 +186,7 @@ func validateGroupObjectJSON(decoder *json.Decoder, configCount int, path string
 				return fmt.Errorf("%s contains duplicate groups fields", path)
 			}
 			seenGroups = true
-			if err := validateGroupArrayJSON(decoder, configCount, path+".groups", depth, count); err != nil {
+			if err := validateGroupArrayJSON(decoder, path+".groups", depth, count); err != nil {
 				return err
 			}
 		default:

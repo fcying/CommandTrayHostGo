@@ -642,6 +642,12 @@ func (a *TrayApp) showMenu() {
 		startupFlags |= mfGray | mfDisabled
 		startupText += " (" + text.OriginalUserOnly + ")"
 	} else {
+		if err := a.startup.Migrate(); err != nil {
+			ShowError(productName, err.Error())
+			if a.closing.Load() || a.closed || a.closePending || a.sessionEndPending {
+				return
+			}
+		}
 		startupEnabled, err := a.startup.Enabled()
 		if err != nil {
 			ShowError(productName, err.Error())
@@ -693,9 +699,15 @@ func (a *TrayApp) appendConfiguredMenus(menu uintptr) error {
 
 func (a *TrayApp) appendGroupItems(menu uintptr, items []config.GroupItem) error {
 	for _, item := range items {
-		if item.EntryIndex != nil {
-			if err := a.appendEntryMenu(menu, *item.EntryIndex); err != nil {
-				return err
+		if item.EntryName != nil {
+			for index := range a.entries {
+				if a.entries[index].config.Name != *item.EntryName {
+					continue
+				}
+				if err := a.appendEntryMenu(menu, index); err != nil {
+					return err
+				}
+				break
 			}
 			continue
 		}
@@ -891,14 +903,18 @@ func (a *TrayApp) handleLeftClick() {
 		return
 	}
 	var errs []error
-	for _, index := range a.config.LeftClick {
-		if index >= 0 && index < len(a.entries) {
+	for _, name := range a.config.LeftClick {
+		for index := range a.entries {
+			if a.entries[index].config.Name != name {
+				continue
+			}
 			if err := a.toggleEntryWindow(index); err != nil {
 				errs = append(errs, err)
 			}
 			if a.closing.Load() || a.closed || a.closePending {
 				return
 			}
+			break
 		}
 	}
 	if err := errors.Join(errs...); err != nil {

@@ -66,7 +66,7 @@ func TestHiddenManagedBackgroundProcessSkipsWindowDiscovery(t *testing.T) {
 	process := &childProcess{handle: handle, pid: uint32(command.Process.Pid), helperPath: executablePath}
 	t.Cleanup(process.Close)
 	app := TrayApp{
-		config: config.Config{LeftClick: []int{0}},
+		config: config.Config{LeftClick: []string{"background"}},
 		entries: []trayEntry{{
 			config: config.EntryConfig{
 				Name:  "background",
@@ -519,6 +519,58 @@ func TestToggleEntryWindowCachesGeometryWhileIconRetries(t *testing.T) {
 	}
 	if entry.config.CachedSize == nil || *entry.config.CachedSize != currentSize {
 		t.Fatalf("cached size = %v, want %v", entry.config.CachedSize, currentSize)
+	}
+}
+
+func TestNamedLeftClickFollowsReorderedEntries(t *testing.T) {
+	runtime.LockOSThread()
+	t.Cleanup(runtime.UnlockOSThread)
+	first := createTestTopLevelWindow(t, false)
+	second := createTestTopLevelWindow(t, false)
+	process := &childProcess{handle: windows.CurrentProcess(), pid: uint32(os.Getpid())}
+	app := TrayApp{
+		config: config.Config{LeftClick: []string{"second"}},
+		entries: []trayEntry{
+			{config: config.EntryConfig{Name: "first", IsGUI: true}, ownership: domain.ManagedAndJobOwned, state: domain.EntryState{Running: true}, process: process, hwnd: first},
+			{config: config.EntryConfig{Name: "second", IsGUI: true}, ownership: domain.ManagedAndJobOwned, state: domain.EntryState{Running: true}, process: process, hwnd: second},
+		},
+	}
+	app.handleLeftClick()
+	if app.entries[0].state.Show || !app.entries[1].state.Show || !app.entries[1].showPending {
+		t.Fatal("left click did not request showing only the named window")
+	}
+	app.entries[0], app.entries[1] = app.entries[1], app.entries[0]
+	app.handleLeftClick()
+	if app.entries[0].state.Show || app.entries[1].state.Show {
+		t.Fatal("left click did not follow the named window after reordering")
+	}
+}
+
+func TestNamedGroupMenuFollowsReorderedEntries(t *testing.T) {
+	runtime.LockOSThread()
+	t.Cleanup(runtime.UnlockOSThread)
+	name := "second"
+	items := []config.GroupItem{{Group: &config.Group{Name: "Tools", Items: []config.GroupItem{{EntryName: &name}}}}}
+	app := TrayApp{entries: []trayEntry{{config: config.EntryConfig{Name: "first"}}, {config: config.EntryConfig{Name: "second"}}}}
+	getSubMenu := user32.NewProc("GetSubMenu")
+	getMenuItemID := user32.NewProc("GetMenuItemID")
+	for _, index := range []int{1, 0} {
+		menu, _, err := procCreatePopupMenu.Call()
+		if menu == 0 {
+			t.Fatal(err)
+		}
+		if err := app.appendGroupItems(menu, items); err != nil {
+			procDestroyMenu.Call(menu)
+			t.Fatal(err)
+		}
+		groupMenu, _, _ := getSubMenu.Call(menu, 0)
+		entryMenu, _, _ := getSubMenu.Call(groupMenu, 0)
+		command, _, _ := getMenuItemID.Call(entryMenu, 3)
+		procDestroyMenu.Call(menu)
+		if command != entryCommand(index, commandShowHide) {
+			t.Fatalf("named submenu targets command %d, want entry %d", command, index)
+		}
+		app.entries[0], app.entries[1] = app.entries[1], app.entries[0]
 	}
 }
 
