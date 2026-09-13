@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -38,6 +39,32 @@ func TestParseJSONWithCommentsAndTrailingCommas(t *testing.T) {
 	}
 }
 
+func TestParseSourceDigestBindsOriginalBytes(t *testing.T) {
+	original := []byte(validConfig)
+	changed := []byte(strings.Replace(validConfig, "Existing files", "Modified files", 1))
+	if len(original) != len(changed) {
+		t.Fatal("digest regression requires equal-length inputs")
+	}
+	wantOriginal, wantChanged := sha256.Sum256(original), sha256.Sum256(changed)
+	first, err := Parse(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Parse(changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Configs[0].Name != second.Configs[0].Name {
+		t.Fatal("comment change altered the parsed entry name")
+	}
+	if first.SourceDigest != wantOriginal || second.SourceDigest != wantChanged {
+		t.Fatal("source digest does not match original input bytes")
+	}
+	if first.SourceDigest == second.SourceDigest {
+		t.Fatal("distinct equal-length source configs have the same digest")
+	}
+}
+
 func TestParseUTF16AndUTF32(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -55,6 +82,9 @@ func TestParseUTF16AndUTF32(t *testing.T) {
 			}
 			if len(cfg.Configs) != 1 {
 				t.Fatalf("configs = %d, want 1", len(cfg.Configs))
+			}
+			if cfg.SourceDigest != sha256.Sum256(tc.data) {
+				t.Fatal("source digest does not match the original encoded bytes")
 			}
 		})
 	}
@@ -700,7 +730,7 @@ func TestParseAcceptsCaseInsensitiveRequiredFields(t *testing.T) {
 }
 
 func TestValidateRejectsTooManyEntries(t *testing.T) {
-	cfg := Config{Configs: make([]EntryConfig, maxConfigEntries+1)}
+	cfg := Config{Configs: make([]EntryConfig, MaxConfigEntries+1)}
 	if err := cfg.validate(); err == nil {
 		t.Fatal("validate succeeded, want too many entries error")
 	}

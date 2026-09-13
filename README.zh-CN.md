@@ -195,7 +195,7 @@ enabled
 |`enable_all`|启动除 `ignore_all` 外的 entry.|
 |`hide_all` / `show_all`|隐藏或显示所有已运行 entry 的窗口.|
 |`restart_all`|重启除 `ignore_all` 外的受管 entry.|
-|`elevate`|以管理员权限重新启动宿主; 有受管程序运行时拒绝执行.|
+|`elevate`|切换宿主权限: 普通权限时直接请求系统 UAC, 已提权时以原桌面用户的普通权限重启. 两个方向均恢复运行状态; 取消 UAC 不影响现有进程.|
 |`exit`|退出宿主.|
 |`left_click` / `right_click`|执行托盘左键或右键动作.|
 |`add_alpha` / `minus_alpha`|调整当前前台窗口透明度.|
@@ -300,6 +300,8 @@ Windows Terminal 和其他 pseudoconsole 没有可由 child PID 独立控制的�
 
 所有普通受管进程以 suspended 状态创建, 成功加入 Job Object 后再 resume, 避免 assignment 前逃逸. Job Object 使用 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`.
 
+如果父 Job Object 拒绝 breakaway, Job Object 托管的子进程可通过嵌套作业启动, 仍保持宿主所有权. Fully detached 启动仍要求成功脱离, 被拒绝时会报告失败.
+
 ## Groups
 
 `groups` 中的字符串必须精确匹配已有的 `configs[].name`,区分大小写. 未知名称和数字索引均为配置错误. group 对象必须提供 `name`,省略嵌套的 `groups` 数组时为空组. group 标题不要求全局唯一,可以重复引用同一个 entry. entry 重命名时必须同步更新所有引用. 最大嵌套深度为 40,包含 group 对象在内的菜单项总数最多 3584. 下例是根层级片段,要求 `configs` 包含名为 `Console`,`Editor` 和 `Monitor` 的 entry,不是完整配置文件:
@@ -378,7 +380,11 @@ second minute hour day-of-month month day-of-week
 
 单击 entry 的 path 会打开目录; 单击 cmd 会在 Explorer 中定位可执行文件.
 
-启用 cron 的 entry 会在 path 和 cmd 行显示 check mark. 提权后 Elevate 继续显示,其 check mark 表示宿主已经提权.
+启用 cron 的 entry 会在 path 和 cmd 行显示 check mark. 普通权限时菜单显示“提权”, 已提权时显示“取消提权”, check mark 表示当前管理员状态. 菜单和 `hotkey.elevate` 均执行双向权限切换.
+
+受管程序运行时也可切换宿主权限, 不显示应用确认框. 提权直接请求系统 UAC; 取消提权使用原用户 Windows Explorer 的非管理员令牌重启, 不会用普通子进程启动方式继承管理员权限. 原桌面 shell 不可用或用户不匹配时安全失败. 新实例验证目标权限及配置并确认就绪, 旧宿主随后采集最终运行状态, 收到确认后才提交退出. 新实例等待旧宿主完成清理后恢复启用和显示状态, 不依赖缓存是否开启. Job Object 内的程序会重启, 已启动的 detached 程序不会重复启动. 取消 UAC 或交接失败时, 原宿主和仍在运行的子进程保持不变. 根配置 `require_admin=true` 或需要重启的 entry 明确要求管理员权限时, 会拒绝取消提权. 当前 `-c` 参数和原始启动用户 SID 保留.
+
+提权通过经过身份验证的本地命名管道传输快照, 不使用持久化或共享可写文件; 交接不要求配置目录可写. 两个实例在接受交接前均验证对端进程身份. 交接数据按配置 entry 顺序保存运行状态标志, 并绑定原始配置内容的 SHA-256 摘要. entry 名称仅保留在配置中, 不会复制到交接数据, 因此长名称不会增大交接数据或阻止提权. 查询进程状态失败时会报告对应 entry 和原生错误, 而不是将其视为取消; 原宿主及其受管程序继续运行.
 
 Docked Windows 标签依次回退到窗口标题、Win32 class name 和本地化无标题标签. 选择单个 docked window 会恢复并激活它; Show All 恢复全部窗口,但不会任意选择一个窗口激活.
 

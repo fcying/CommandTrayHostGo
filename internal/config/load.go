@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -29,8 +30,9 @@ func (s FileStamp) Equal(other FileStamp) bool {
 }
 
 const (
-	maxConfigSize    = 100 << 20
-	maxConfigEntries = 3584
+	maxConfigSize = 100 << 20
+	// MaxConfigEntries bounds config entries and their associated runtime state.
+	MaxConfigEntries = 3584
 )
 
 const defaultConfigEnglish = `{
@@ -320,6 +322,8 @@ func Load(path string) (Config, error) {
 }
 
 func Parse(raw []byte) (Config, error) {
+	// JSONC standardization can mutate the input buffer.
+	sourceDigest := sha256.Sum256(raw)
 	utf8Data, err := decodeText(raw)
 	if err != nil {
 		return Config{}, fmt.Errorf("decode config: %w", err)
@@ -339,6 +343,7 @@ func Parse(raw []byte) (Config, error) {
 	if err := cfg.validate(); err != nil {
 		return Config{}, err
 	}
+	cfg.SourceDigest = sourceDigest
 	return cfg, nil
 }
 
@@ -483,8 +488,8 @@ func (c Config) validate() error {
 	if len(c.Configs) == 0 {
 		return errors.New("config must contain at least one entry in configs")
 	}
-	if len(c.Configs) > maxConfigEntries {
-		return fmt.Errorf("config contains %d entries; maximum is %d", len(c.Configs), maxConfigEntries)
+	if len(c.Configs) > MaxConfigEntries {
+		return fmt.Errorf("config contains %d entries; maximum is %d", len(c.Configs), MaxConfigEntries)
 	}
 	if c.GlobalHotkeyAlphaStep != nil && (*c.GlobalHotkeyAlphaStep < 1 || *c.GlobalHotkeyAlphaStep > 255) {
 		return errors.New("global_hotkey_alpha_step must be between 1 and 255")

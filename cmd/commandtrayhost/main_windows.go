@@ -61,6 +61,14 @@ func main() {
 		win32.ShowError(applicationName, err.Error())
 		return
 	}
+	var elevationState *win32.ElevationState
+	if options.ElevationPipeName != "" {
+		elevationState, err = win32.ReceiveElevation(options.ElevationPipeName, executablePath, options.ConfigArgument)
+		if err != nil {
+			win32.ShowError(applicationName, err.Error())
+			return
+		}
+	}
 
 	instance, err := win32.AcquireInstance(executablePath, options.ForceRestart)
 	if err != nil {
@@ -71,10 +79,16 @@ func main() {
 
 	systemLocale := i18n.DetectSystemLocale()
 	defaultLanguage := i18n.Resolve("", systemLocale)
-	cfg, configStamp, err := config.LoadOrCreateSnapshot(options.ConfigPath, defaultLanguage, win32.SystemDirectory)
-	if err != nil {
-		win32.ShowError(applicationName, err.Error())
-		return
+	var cfg config.Config
+	var configStamp config.FileStamp
+	if elevationState != nil {
+		cfg, configStamp = elevationState.Config, elevationState.ConfigStamp
+	} else {
+		cfg, configStamp, err = config.LoadOrCreateSnapshot(options.ConfigPath, defaultLanguage, win32.SystemDirectory)
+		if err != nil {
+			win32.ShowError(applicationName, err.Error())
+			return
+		}
 	}
 	language := i18n.Resolve(cfg.Lang, systemLocale)
 	cache, cacheErr := statecache.OpenStartupSnapshot(options.CachePath, &cfg, configStamp)
@@ -103,6 +117,12 @@ func main() {
 	}
 
 	app := win32.NewTrayApp(applicationName, cfg.DisplayName(), executablePath, options.StartupUserSID, baseDir, options.ConfigPath, options.CachePath, options.ConfigArgument, cfg, configStamp, cache, language)
+	if elevationState != nil {
+		if err := app.RestoreElevationState(*elevationState); err != nil {
+			win32.ShowError(applicationName, err.Error())
+			return
+		}
+	}
 	if err := app.Run(); err != nil {
 		win32.ShowError(applicationName, err.Error())
 	}
