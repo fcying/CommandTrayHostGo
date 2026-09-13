@@ -9,11 +9,13 @@ import (
 )
 
 type LaunchOptions struct {
-	ForceRestart   bool
-	StartupUserSID string
-	ConfigPath     string
-	CachePath      string
-	ConfigArgument string
+	ForceRestart      bool
+	StartupUserSID    string
+	ConfigPath        string
+	CachePath         string
+	ConfigArgument    string
+	ElevationPipeName string
+	ReturnTokenHandle uintptr
 }
 
 func ParseLaunchOptions(args []string, baseDir string) (LaunchOptions, error) {
@@ -28,6 +30,22 @@ func ParseLaunchOptions(args []string, baseDir string) (LaunchOptions, error) {
 			options.ForceRestart = true
 		case strings.HasPrefix(arg, "startup-user="):
 			options.StartupUserSID = strings.TrimPrefix(arg, "startup-user=")
+		case arg == "--elevation-pipe":
+			if options.ElevationPipeName != "" || i+1 >= len(args) || args[i+1] == "" {
+				return LaunchOptions{}, errors.New("--elevation-pipe requires one pipe name")
+			}
+			i++
+			options.ElevationPipeName = args[i]
+		case arg == "--return-token":
+			if options.ReturnTokenHandle != 0 || i+1 >= len(args) {
+				return LaunchOptions{}, errors.New("--return-token requires one inherited token handle")
+			}
+			i++
+			value, err := strconv.ParseUint(args[i], 10, strconv.IntSize)
+			if err != nil || value == 0 {
+				return LaunchOptions{}, errors.New("invalid inherited return token handle")
+			}
+			options.ReturnTokenHandle = uintptr(value)
 		case arg == "-c":
 			if options.ConfigArgument != "" {
 				return LaunchOptions{}, errors.New("-c may only be specified once")
@@ -50,6 +68,9 @@ func ParseLaunchOptions(args []string, baseDir string) (LaunchOptions, error) {
 		default:
 			return LaunchOptions{}, errors.New("unknown argument: " + arg)
 		}
+	}
+	if options.ElevationPipeName != "" && options.ReturnTokenHandle != 0 {
+		return LaunchOptions{}, errors.New("elevation pipe and inherited return token are mutually exclusive")
 	}
 	return options, nil
 }

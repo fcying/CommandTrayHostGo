@@ -179,18 +179,27 @@ func (c *processController) Start(entry config.EntryConfig, ownership domain.Own
 		}
 	}
 	var processInfo windows.ProcessInformation
-	err = windows.CreateProcess(
-		nil,
-		&commandLineUTF16[0],
-		nil,
-		nil,
-		false,
-		windows.CREATE_NEW_CONSOLE|windows.CREATE_BREAKAWAY_FROM_JOB|windows.CREATE_SUSPENDED,
-		nil,
-		workingDirectoryPtr,
-		&startup,
-		&processInfo,
-	)
+	creationFlags := uint32(windows.CREATE_NEW_CONSOLE | windows.CREATE_BREAKAWAY_FROM_JOB | windows.CREATE_SUSPENDED)
+	for range 2 {
+		err = windows.CreateProcess(
+			nil,
+			&commandLineUTF16[0],
+			nil,
+			nil,
+			false,
+			creationFlags,
+			nil,
+			workingDirectoryPtr,
+			&startup,
+			&processInfo,
+		)
+		if !errors.Is(err, windows.ERROR_ACCESS_DENIED) || ownership == domain.FullyDetached {
+			break
+		}
+		// Windows 10 supports nested jobs. Owned children can remain in a
+		// restrictive parent job, but detached children must actually escape it.
+		creationFlags &^= windows.CREATE_BREAKAWAY_FROM_JOB
+	}
 	runtime.KeepAlive(commandLineUTF16)
 	runtime.KeepAlive(workingDirectoryPtr)
 	runtime.KeepAlive(title)
@@ -707,22 +716,6 @@ func findWindowProc(hwnd, lparam uintptr) uintptr {
 
 func IsElevated() bool {
 	return windows.GetCurrentProcessToken().IsElevated()
-}
-
-func RelaunchElevated(executablePath, workingDirectory, startupUserSID, configPath string) error {
-	parameters := "force-restart"
-	if startupUserSID != "" {
-		parameters += " startup-user=" + windows.EscapeArg(startupUserSID)
-	}
-	if configPath != "" {
-		parameters += " -c " + windows.EscapeArg(configPath)
-	}
-	handle, err := shellExecuteProcess(executablePath, parameters, workingDirectory, windows.SW_HIDE)
-	if err != nil {
-		return fmt.Errorf("relaunch as administrator: %w", err)
-	}
-	windows.CloseHandle(handle)
-	return nil
 }
 
 func shellExecuteProcess(executable, parameters, workingDirectory string, show int32) (windows.Handle, error) {
