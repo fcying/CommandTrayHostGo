@@ -48,6 +48,23 @@ func TestParseLaunchOptionsInternalArguments(t *testing.T) {
 	}
 }
 
+func TestParseElevationHandoffArguments(t *testing.T) {
+	base := t.TempDir()
+	pipe := `\\.\pipe\CommandTrayHostGo.Elevation.123.nonce`
+	options, err := ParseLaunchOptions([]string{"force-restart", "startup-user=S-1-5-21", "--elevation-pipe", pipe, "-c", "active config.json"}, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.ElevationPipeName != pipe || options.ConfigArgument != filepath.Join(base, "active config.json") || options.StartupUserSID != "S-1-5-21" {
+		t.Fatalf("handoff launch arguments lost: %+v", options)
+	}
+	for _, args := range [][]string{{"--elevation-pipe"}, {"--elevation-pipe", ""}, {"--elevation-pipe", pipe, "--elevation-pipe", pipe}} {
+		if _, err := ParseLaunchOptions(args, base); err == nil {
+			t.Fatalf("accepted invalid handoff arguments %q", args)
+		}
+	}
+}
+
 func TestConsoleWindowQueryArgument(t *testing.T) {
 	const wantPID = uint32(4294967295)
 	argument := ConsoleWindowQueryArgument(wantPID)

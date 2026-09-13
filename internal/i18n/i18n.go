@@ -49,6 +49,7 @@ type Strings struct {
 	StartOnBoot            string
 	OriginalUserOnly       string
 	Elevate                string
+	Unelevate              string
 	Home                   string
 	About                  string
 	Help                   string
@@ -96,6 +97,7 @@ func Text(language Language) Strings {
 			StartOnBoot:            "开机启动",
 			OriginalUserOnly:       "仅限原用户",
 			Elevate:                "提权",
+			Unelevate:              "取消提权",
 			Home:                   "主页",
 			About:                  "关于",
 			Help:                   "帮助",
@@ -141,6 +143,7 @@ func Text(language Language) Strings {
 		StartOnBoot:            "Start on Boot",
 		OriginalUserOnly:       "original user only",
 		Elevate:                "Elevate",
+		Unelevate:              "Drop Administrator Privileges",
 		Home:                   "Home",
 		About:                  "About",
 		Help:                   "Help",

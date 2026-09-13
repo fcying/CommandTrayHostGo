@@ -11,7 +11,7 @@ import (
 
 const (
 	maxGroupDepth = 40
-	maxGroupItems = maxConfigEntries
+	maxGroupItems = MaxConfigEntries
 )
 
 type GroupItem struct {

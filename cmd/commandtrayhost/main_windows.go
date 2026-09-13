@@ -16,6 +16,7 @@ import (
 	"github.com/fcying/CommandTrayHostGo/internal/i18n"
 	"github.com/fcying/CommandTrayHostGo/internal/statecache"
 	"github.com/fcying/CommandTrayHostGo/internal/win32"
+	"golang.org/x/sys/windows"
 )
 
 const applicationName = "CommandTrayHostGo"
@@ -61,6 +62,18 @@ func main() {
 		win32.ShowError(applicationName, err.Error())
 		return
 	}
+	if options.ReturnTokenHandle != 0 {
+		defer windows.Token(options.ReturnTokenHandle).Close()
+	}
+	var elevationState *win32.ElevationState
+	if options.ElevationPipeName != "" {
+		elevationState, err = win32.ReceiveElevation(options.ElevationPipeName, executablePath, options.ConfigArgument, options.StartupUserSID)
+		if err != nil {
+			win32.ShowError(applicationName, err.Error())
+			return
+		}
+		defer elevationState.Close()
+	}
 
 	instance, err := win32.AcquireInstance(executablePath, options.ForceRestart)
 	if err != nil {
@@ -71,10 +84,16 @@ func main() {
 
 	systemLocale := i18n.DetectSystemLocale()
 	defaultLanguage := i18n.Resolve("", systemLocale)
-	cfg, configStamp, err := config.LoadOrCreateSnapshot(options.ConfigPath, defaultLanguage, win32.SystemDirectory)
-	if err != nil {
-		win32.ShowError(applicationName, err.Error())
-		return
+	var cfg config.Config
+	var configStamp config.FileStamp
+	if elevationState != nil {
+		cfg, configStamp = elevationState.Config, elevationState.ConfigStamp
+	} else {
+		cfg, configStamp, err = config.LoadOrCreateSnapshot(options.ConfigPath, defaultLanguage, win32.SystemDirectory)
+		if err != nil {
+			win32.ShowError(applicationName, err.Error())
+			return
+		}
 	}
 	language := i18n.Resolve(cfg.Lang, systemLocale)
 	cache, cacheErr := statecache.OpenStartupSnapshot(options.CachePath, &cfg, configStamp)
@@ -96,13 +115,31 @@ func main() {
 		win32.ShowError(applicationName, cacheErr.Error())
 	}
 	if cfg.RequireAdmin && !win32.IsElevated() {
-		if err := win32.RelaunchElevated(executablePath, baseDir, win32.StartupUserSID(), options.ConfigArgument); err != nil {
+		state := win32.ElevationState{SourceConfigDigest: cfg.SourceDigest, Entries: make([]win32.ElevationEntry, len(cfg.Configs))}
+		for i, entry := range cfg.Configs {
+			state.Entries[i] = win32.ElevationEntry{Enabled: entry.Enabled, Show: entry.EffectiveStartShow()}
+		}
+		if err := win32.BeginElevation(executablePath, options.ConfigArgument, win32.StartupUserSID(), state, func() (win32.ElevationState, bool, error) {
+			return state, true, nil
+		}); err != nil {
 			win32.ShowError(applicationName, err.Error())
 		}
 		return
 	}
 
 	app := win32.NewTrayApp(applicationName, cfg.DisplayName(), executablePath, options.StartupUserSID, baseDir, options.ConfigPath, options.CachePath, options.ConfigArgument, cfg, configStamp, cache, language)
+	if elevationState != nil {
+		if err := app.RestoreElevationState(*elevationState); err != nil {
+			win32.ShowError(applicationName, err.Error())
+			return
+		}
+	}
+	if options.ReturnTokenHandle != 0 {
+		if err := app.RestoreReturnToken(windows.Token(options.ReturnTokenHandle)); err != nil {
+			win32.ShowError(applicationName, err.Error())
+			return
+		}
+	}
 	if err := app.Run(); err != nil {
 		win32.ShowError(applicationName, err.Error())
 	}

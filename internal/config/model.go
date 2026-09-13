@@ -8,6 +8,7 @@ import (
 )
 
 type Config struct {
+	SourceDigest          [32]byte      `json:"-"`
 	Lang                  string        `json:"lang"`
 	RequireAdmin          bool          `json:"require_admin"`
 	StartShowSilent       *bool         `json:"start_show_silent"`

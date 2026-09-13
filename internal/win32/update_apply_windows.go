@@ -18,7 +18,17 @@ const updateHelperArgument = "--apply-update"
 
 // LaunchUpdateHelper starts a detached copy of the current executable. The helper
 // waits for this process to exit, atomically replaces target, and relaunches it.
-func LaunchUpdateHelper(target, update, configArgument, startupUserSID string) error {
+func LaunchUpdateHelper(target, update, configArgument, startupUserSID string, retained windows.Token) error {
+	var inheritedToken windows.Handle
+	if retained != 0 {
+		if err := requireUnelevatedUser(retained, startupUserSID); err != nil {
+			return fmt.Errorf("validate update return token: %w", err)
+		}
+		if err := windows.DuplicateHandle(windows.CurrentProcess(), windows.Handle(retained), windows.CurrentProcess(), &inheritedToken, 0, true, windows.DUPLICATE_SAME_ACCESS); err != nil {
+			return fmt.Errorf("duplicate update return token: %w", err)
+		}
+		defer windows.CloseHandle(inheritedToken)
+	}
 	var process windows.Handle
 	if err := windows.DuplicateHandle(windows.CurrentProcess(), windows.CurrentProcess(), windows.CurrentProcess(), &process, windows.SYNCHRONIZE, true, 0); err != nil {
 		return fmt.Errorf("duplicate current process handle: %w", err)
@@ -29,9 +39,12 @@ func LaunchUpdateHelper(target, update, configArgument, startupUserSID string) e
 	if err := copyUpdateFile(target, helper); err != nil {
 		return fmt.Errorf("create update helper: %w", err)
 	}
-	arguments := []string{updateHelperArgument, strconv.FormatUint(uint64(process), 10), update, target, configArgument, startupUserSID}
+	arguments := []string{updateHelperArgument, strconv.FormatUint(uint64(process), 10), update, target, configArgument, startupUserSID, strconv.FormatUint(uint64(inheritedToken), 10)}
 	command := exec.Command(helper, arguments...)
 	command.SysProcAttr = &syscall.SysProcAttr{AdditionalInheritedHandles: []syscall.Handle{syscall.Handle(process)}}
+	if inheritedToken != 0 {
+		command.SysProcAttr.AdditionalInheritedHandles = append(command.SysProcAttr.AdditionalInheritedHandles, syscall.Handle(inheritedToken))
+	}
 	command.Dir = directory
 	if err := command.Start(); err != nil {
 		os.Remove(helper)
@@ -42,7 +55,7 @@ func LaunchUpdateHelper(target, update, configArgument, startupUserSID string) e
 
 // ApplyUpdate waits for the old process, replaces its executable, and restarts it.
 func ApplyUpdate(arguments []string) error {
-	if len(arguments) != 6 || arguments[0] != updateHelperArgument {
+	if len(arguments) != 7 || arguments[0] != updateHelperArgument {
 		return errors.New("invalid update helper arguments")
 	}
 	value, err := strconv.ParseUint(arguments[1], 10, 64)
@@ -52,6 +65,17 @@ func ApplyUpdate(arguments []string) error {
 	update, target, configArgument, startupUserSID := arguments[2], arguments[3], arguments[4], arguments[5]
 	process := windows.Handle(value)
 	defer windows.CloseHandle(process)
+	tokenValue, err := strconv.ParseUint(arguments[6], 10, 64)
+	if err != nil {
+		return errors.New("invalid update return token handle")
+	}
+	retained := windows.Token(tokenValue)
+	if retained != 0 {
+		defer retained.Close()
+		if err := requireUnelevatedUser(retained, startupUserSID); err != nil {
+			return fmt.Errorf("validate inherited update return token: %w", err)
+		}
+	}
 	status, err := windows.WaitForSingleObject(process, windows.INFINITE)
 	if err != nil {
 		return fmt.Errorf("wait for old process: %w", err)
@@ -63,29 +87,29 @@ func ApplyUpdate(arguments []string) error {
 	// must still restart the old host, which has already exited.
 	var helperProcess windows.Handle
 	if err := windows.DuplicateHandle(windows.CurrentProcess(), windows.CurrentProcess(), windows.CurrentProcess(), &helperProcess, windows.SYNCHRONIZE, true, 0); err != nil {
-		return errors.Join(fmt.Errorf("duplicate update helper handle: %w", err), restartPreviousUpdate(target, configArgument, startupUserSID))
+		return errors.Join(fmt.Errorf("duplicate update helper handle: %w", err), restartPreviousUpdate(target, configArgument, startupUserSID, retained))
 	}
 	defer windows.CloseHandle(helperProcess)
-	return applyUpdateFiles(update, target, configArgument, startupUserSID, helperProcess)
+	return applyUpdateFiles(update, target, configArgument, startupUserSID, helperProcess, retained)
 }
 
-func applyUpdateFiles(update, target, configArgument, startupUserSID string, helperProcess windows.Handle) error {
+func applyUpdateFiles(update, target, configArgument, startupUserSID string, helperProcess windows.Handle, retained windows.Token) error {
 	backup := update + ".previous"
 	if err := moveUpdateFile(target, backup); err != nil {
-		return errors.Join(fmt.Errorf("backup current executable: %w", err), restartPreviousUpdate(target, configArgument, startupUserSID))
+		return errors.Join(fmt.Errorf("backup current executable: %w", err), restartPreviousUpdate(target, configArgument, startupUserSID, retained))
 	}
 	if err := moveUpdateFile(update, target); err != nil {
-		return errors.Join(fmt.Errorf("install update: %w", err), restorePreviousUpdate(update, target, configArgument, startupUserSID, false))
+		return errors.Join(fmt.Errorf("install update: %w", err), restorePreviousUpdate(update, target, configArgument, startupUserSID, false, retained))
 	}
-	command := updateCommand(target, configArgument, startupUserSID, "--finish-update", strconv.FormatUint(uint64(helperProcess), 10), update)
-	command.SysProcAttr = &syscall.SysProcAttr{AdditionalInheritedHandles: []syscall.Handle{syscall.Handle(helperProcess)}}
+	command := updateCommand(target, configArgument, startupUserSID, retained, "--finish-update", strconv.FormatUint(uint64(helperProcess), 10), update)
+	command.SysProcAttr.AdditionalInheritedHandles = append(command.SysProcAttr.AdditionalInheritedHandles, syscall.Handle(helperProcess))
 	if err := command.Start(); err != nil {
-		return errors.Join(fmt.Errorf("restart updated application: %w", err), restorePreviousUpdate(update, target, configArgument, startupUserSID, true))
+		return errors.Join(fmt.Errorf("restart updated application: %w", err), restorePreviousUpdate(update, target, configArgument, startupUserSID, true, retained))
 	}
 	return command.Process.Release()
 }
 
-func restorePreviousUpdate(update, target, configArgument, startupUserSID string, installed bool) error {
+func restorePreviousUpdate(update, target, configArgument, startupUserSID string, installed bool, retained windows.Token) error {
 	if installed {
 		if err := moveUpdateFile(target, update); err != nil {
 			// Keep the backup intact and never execute the failed new target.
@@ -95,13 +119,13 @@ func restorePreviousUpdate(update, target, configArgument, startupUserSID string
 	if err := moveUpdateFile(update+".previous", target); err != nil {
 		return fmt.Errorf("restore previous executable (backup retained at %s): %w", update+".previous", err)
 	}
-	return restartPreviousUpdate(target, configArgument, startupUserSID)
+	return restartPreviousUpdate(target, configArgument, startupUserSID, retained)
 }
 
-func restartPreviousUpdate(target, configArgument, startupUserSID string) error {
-	// Older hosts do not understand --finish-update. Start them immediately,
-	// without a helper wait, so displaying the failure cannot block recovery.
-	command := updateCommand(target, configArgument, startupUserSID)
+func restartPreviousUpdate(target, configArgument, startupUserSID string, retained windows.Token) error {
+	// Restart immediately without a helper wait, so displaying the failure
+	// cannot block recovery. Preserve the original user's return capability.
+	command := updateCommand(target, configArgument, startupUserSID, retained)
 	if err := command.Start(); err != nil {
 		return fmt.Errorf("restart previous application: %w", err)
 	}
@@ -111,8 +135,13 @@ func restartPreviousUpdate(target, configArgument, startupUserSID string) error 
 	return nil
 }
 
-func updateCommand(target, configArgument, startupUserSID string, arguments ...string) *exec.Cmd {
+func updateCommand(target, configArgument, startupUserSID string, retained windows.Token, arguments ...string) *exec.Cmd {
 	command := exec.Command(target, arguments...)
+	command.SysProcAttr = &syscall.SysProcAttr{}
+	if retained != 0 {
+		command.Args = append(command.Args, "--return-token", strconv.FormatUint(uint64(retained), 10))
+		command.SysProcAttr.AdditionalInheritedHandles = []syscall.Handle{syscall.Handle(retained)}
+	}
 	command.Dir = filepath.Dir(target)
 	if configArgument != "" {
 		command.Args = append(command.Args, "-c", configArgument)

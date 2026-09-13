@@ -177,7 +177,7 @@ func (a *TrayApp) resumeUpdateUI() {
 			ShowError(productName, pending.err.Error())
 			return
 		}
-		if err := LaunchUpdateHelper(a.executablePath, pending.updatePath, a.configArgument, a.startupUserSID); err != nil {
+		if err := LaunchUpdateHelper(a.executablePath, pending.updatePath, a.configArgument, a.startupUserSID, a.elevationReturnToken); err != nil {
 			_ = os.Remove(pending.updatePath)
 			ShowError(productName, err.Error())
 			return
