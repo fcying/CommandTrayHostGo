@@ -9,11 +9,12 @@ import (
 )
 
 type LaunchOptions struct {
-	ForceRestart   bool
-	StartupUserSID string
-	ConfigPath     string
-	CachePath      string
-	ConfigArgument string
+	ForceRestart      bool
+	StartupUserSID    string
+	ConfigPath        string
+	CachePath         string
+	ConfigArgument    string
+	ElevationPipeName string
 }
 
 func ParseLaunchOptions(args []string, baseDir string) (LaunchOptions, error) {
@@ -28,6 +29,12 @@ func ParseLaunchOptions(args []string, baseDir string) (LaunchOptions, error) {
 			options.ForceRestart = true
 		case strings.HasPrefix(arg, "startup-user="):
 			options.StartupUserSID = strings.TrimPrefix(arg, "startup-user=")
+		case arg == "--elevation-pipe":
+			if options.ElevationPipeName != "" || i+1 >= len(args) || args[i+1] == "" {
+				return LaunchOptions{}, errors.New("--elevation-pipe requires one pipe name")
+			}
+			i++
+			options.ElevationPipeName = args[i]
 		case arg == "-c":
 			if options.ConfigArgument != "" {
 				return LaunchOptions{}, errors.New("-c may only be specified once")

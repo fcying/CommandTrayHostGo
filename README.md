@@ -195,7 +195,7 @@ Global `hotkey` actions:
 | `enable_all` | Start entries except entries with `ignore_all`. |
 | `hide_all` / `show_all` | Hide or show all running entry windows. |
 | `restart_all` | Restart managed entries except entries with `ignore_all`. |
-| `elevate` | Relaunch the host as administrator; rejected while managed entries are running. |
+| `elevate` | Toggle host privilege: request system UAC when normal, or restart as the original desktop user without administrator privileges when elevated. Both directions restore runtime state; canceling UAC leaves existing processes running. |
 | `exit` | Exit the host. |
 | `left_click` / `right_click` | Invoke the corresponding tray action. |
 | `add_alpha` / `minus_alpha` | Adjust the foreground window opacity. |
@@ -298,6 +298,8 @@ A managed entry may run without a controllable window when it starts hidden and 
 
 Normal managed processes are created suspended and resumed only after successful Job Object assignment, preventing escape before assignment. The Job Object uses `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`.
 
+If a parent Job Object denies breakaway, job-owned children may start in a nested job while retaining the host's ownership. Fully detached launches still require breakaway and report failure if it is denied.
+
 ## Groups
 
 Strings in `groups` must exactly match an existing `configs[].name`, including case. Unknown names and numeric indexes are configuration errors. A group object requires `name`; omitting its nested `groups` array creates an empty group. Group titles need not be globally unique, and the same entry may appear more than once. Update all references when an entry is renamed. Maximum nesting depth is 40, with at most 3584 menu items including group objects. The following root-level fragment requires entries named `Console`, `Editor`, and `Monitor` in `configs`; it is not a complete configuration:
@@ -376,7 +378,11 @@ When a newer compatible release is available, Check for Updates downloads its si
 
 Selecting an entry path opens its directory. Selecting its cmd locates the executable in Explorer.
 
-An enabled cron configuration marks the entry's path and cmd rows with check marks. Elevate remains visible after elevation; its check mark indicates that the host is already elevated.
+An enabled cron configuration marks the entry's path and cmd rows with check marks. The privilege menu shows Elevate for a normal host and Drop Administrator Privileges for an elevated host; its check mark indicates the current elevated state. Both the menu and `hotkey.elevate` toggle privilege.
+
+Privilege switching can be used while managed programs are running, without an application confirmation dialog. Elevating requests system UAC directly. Dropping administrator privileges uses the original user's non-elevated Windows Explorer token, not an ordinary child process that inherits administrator rights; it fails safely if the original desktop shell is unavailable or belongs to a different user. The new instance validates its requested privilege and configuration and acknowledges readiness. The old host then captures the final runtime snapshot and commits to shutdown only after acknowledgement. The new instance waits for old-host cleanup, then restores enabled and visibility states even when caching is disabled. Job-owned programs restart; previously launched detached programs are not launched again. Canceling UAC or failing the handoff leaves the original host and remaining children running. Dropping privilege is rejected if root `require_admin` is true or an entry that must restart explicitly requires administrator privileges. The active `-c` argument and original startup user SID are preserved.
+
+Elevation transfers snapshots through an authenticated local named pipe, not a persistent or shared writable file; the configuration directory does not need to be writable for the handoff. Both instances verify their peer's process identity before accepting the transfer. The handoff carries runtime flags in configuration-entry order, bound to the SHA-256 digest of the original configuration contents. Entry names remain in the configuration rather than being copied into the handoff, so long names do not inflate the handoff or prevent elevation. Process-state query failures are reported with the affected entry and native error rather than treated as cancellation; the original host and its managed programs remain running.
 
 Docked Windows labels use the window caption, then the Win32 class name, then the localized untitled-window label. Selecting one docked window restores and activates it. Show All restores every docked window without choosing one to activate.
 

@@ -152,6 +152,7 @@ type TrayApp struct {
 	observedConfigStamp config.FileStamp
 	cache               *statecache.Store
 	entries             []trayEntry
+	elevationRestored   bool
 	processes           *processController
 	hwnd                uintptr
 	defaultIcon         uintptr
@@ -386,6 +387,38 @@ func NewTrayApp(className, tooltip, executablePath, startupUserSID, baseDir, con
 	}
 }
 
+// RestoreElevationState applies a one-shot runtime handoff before Run, without changing the cache.
+func (a *TrayApp) RestoreElevationState(state ElevationState) error {
+	if a.processes != nil || a.hwnd != 0 || a.closed || a.closing.Load() {
+		return errors.New("elevation state must be restored before Run")
+	}
+	if state.SourceConfigDigest == ([32]byte{}) || state.SourceConfigDigest != a.config.SourceDigest {
+		return errors.New("elevation state does not match configured content")
+	}
+	if len(state.Entries) != len(a.entries) {
+		return errors.New("elevation state does not match configured entries")
+	}
+	for i, saved := range state.Entries {
+		entry := &a.entries[i]
+		entry.state.Enabled = saved.Enabled
+		entry.state.Show = saved.Show
+		entry.launched = saved.Launched
+		entry.cronTransient = saved.CronTransient
+		switch entry.ownership {
+		case domain.UnmanagedButJobOwned:
+			// These launches have no retained process handle, but die with the source job.
+			entry.state.Enabled = saved.Enabled || saved.Launched
+		case domain.FullyDetached:
+			// Detached children survive the source and must never be launched a second time.
+			if saved.Launched {
+				entry.state.Enabled = false
+			}
+		}
+	}
+	a.elevationRestored = true
+	return nil
+}
+
 func (a *TrayApp) Run() error {
 	if activeApp != nil {
 		return fmt.Errorf("tray application is already running")
@@ -487,7 +520,9 @@ func (a *TrayApp) Run() error {
 			return nil
 		}
 	}
-	a.startConfiguredEntries()
+	if err := a.startConfiguredEntries(); err != nil {
+		ShowError(productName, err.Error())
+	}
 	if a.closing.Load() || a.closed {
 		return nil
 	}
@@ -662,10 +697,12 @@ func (a *TrayApp) showMenu() {
 		return
 	}
 	elevateFlags := uintptr(mfString)
+	elevateText := text.Elevate
 	if IsElevated() {
 		elevateFlags |= mfChecked
+		elevateText = text.Unelevate
 	}
-	if err := appendMenu(menu, elevateFlags, commandElevate, text.Elevate+a.hotkeyText("hotkey.elevate")); err != nil {
+	if err := appendMenu(menu, elevateFlags, commandElevate, elevateText+a.hotkeyText("hotkey.elevate")); err != nil {
 		ShowError(productName, err.Error())
 		return
 	}
@@ -1103,21 +1140,26 @@ func entryCommand(index int, operation uintptr) uintptr {
 	return commandEntryBase + uintptr(index)*commandEntryStep + operation
 }
 
-func (a *TrayApp) startConfiguredEntries() {
+func (a *TrayApp) startConfiguredEntries() error {
+	var errs []error
+	restored := a.elevationRestored
 	for i := range a.entries {
 		if a.sessionEndPending || a.closing.Load() || a.closed || a.processes == nil {
-			return
+			return errors.Join(errs...)
 		}
 		if !a.entries[i].state.Enabled || a.entries[i].state.Running || a.entries[i].busy {
 			continue
 		}
-		if err := a.startEntry(i, true); err != nil {
-			ShowError(productName, err.Error())
-			if a.closing.Load() || a.closed {
-				return
-			}
+		transient := a.entries[i].cronTransient
+		if err := a.startEntry(i, !restored); err != nil {
+			errs = append(errs, err)
+		}
+		if restored && a.entries[i].state.Running {
+			a.entries[i].cronTransient = transient
 		}
 	}
+	a.elevationRestored = false
+	return errors.Join(errs...)
 }
 
 func (a *TrayApp) startEntry(index int, updateCache bool) error {
@@ -1932,7 +1974,7 @@ func (a *TrayApp) commitReload() {
 			return
 		}
 	}
-	a.startConfiguredEntries()
+	reload.errs = append(reload.errs, a.startConfiguredEntries())
 	if err := a.updateConsoleFallback(); err != nil {
 		reload.errs = append(reload.errs, err)
 	}
@@ -2898,7 +2940,9 @@ func (a *TrayApp) cancelSessionEnd() {
 		}
 	}
 	a.reportWindowTimerError(a.updateWindowTimer())
-	a.startConfiguredEntries()
+	if err := a.startConfiguredEntries(); err != nil {
+		ShowError(productName, err.Error())
+	}
 	if a.closing.Load() || a.closed || a.sessionEndPending {
 		return
 	}

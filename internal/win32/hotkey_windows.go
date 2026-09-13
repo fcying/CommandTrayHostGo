@@ -5,10 +5,11 @@ package win32
 import (
 	"errors"
 	"fmt"
-	"os"
+	"time"
 
 	domain "github.com/fcying/CommandTrayHostGo/internal/app"
 	"github.com/fcying/CommandTrayHostGo/internal/config"
+	"golang.org/x/sys/windows"
 )
 
 const (
@@ -274,26 +275,98 @@ func (a *TrayApp) executeHotkey(action domain.HotkeyAction) {
 }
 
 func (a *TrayApp) elevateHost() error {
-	if IsElevated() {
+	if a.sessionEndPending || a.closePending || a.closing.Load() || a.closed || a.reload != nil || a.reloadChecking || a.exclusion != nil {
 		return nil
 	}
-	if a.hasBusyEntries() {
+	if a.hasBusyEntries() || a.cronActionInFlight() {
 		return fmt.Errorf("wait for current process operations before elevating %s", productName)
 	}
-	for i := range a.entries {
-		if a.entries[i].state.Running && a.entries[i].ownership == domain.ManagedAndJobOwned {
-			return fmt.Errorf("disable managed entries before elevating %s", productName)
-		}
-	}
-	executable, err := os.Executable()
+	// Reuse the reload modal gate to suspend commands, cron and reloads during UAC.
+	a.reloadChecking = true
+	defer func() {
+		a.reloadChecking = false
+		a.resumeCron(time.Now())
+		a.resumePendingReload()
+		a.resumeUpdateUI()
+	}()
+	state, ready, err := a.prepareElevationState()
 	if err != nil {
-		return fmt.Errorf("resolve executable path: %w", err)
-	}
-	if err := RelaunchElevated(executable, a.baseDir, a.startupUserSID, a.configArgument); err != nil {
 		return err
 	}
+	if !ready {
+		return nil
+	}
+	if err := BeginElevation(a.executablePath, a.configArgument, a.startupUserSID, state, a.prepareElevationState); err != nil {
+		if errors.Is(err, windows.ERROR_CANCELLED) {
+			return nil
+		}
+		return err
+	}
+	a.closing.Store(true)
 	procPostMessageW.Call(a.hwnd, wmClose, 0, 0)
 	return nil
+}
+
+func (a *TrayApp) validateUnelevatedRestart(state ElevationState) error {
+	if a.config.RequireAdmin {
+		return errors.New("configuration requires administrator privileges; set require_admin=false before dropping elevation")
+	}
+	for i := range a.entries {
+		entry := &a.entries[i]
+		if entry.ownership == domain.FullyDetached || !entry.config.RequireAdmin {
+			continue
+		}
+		if state.Entries[i].Enabled || entry.ownership == domain.UnmanagedButJobOwned && state.Entries[i].Launched {
+			return fmt.Errorf("%q requires administrator privileges; disable it before dropping elevation", entry.config.Name)
+		}
+	}
+	return nil
+}
+
+func (a *TrayApp) prepareElevationState() (ElevationState, bool, error) {
+	if a.sessionEndPending || a.closePending || a.closing.Load() || a.closed || a.reload != nil || a.exclusion != nil || a.hasBusyEntries() || a.cronActionInFlight() {
+		return ElevationState{}, false, nil
+	}
+	state := ElevationState{SourceConfigDigest: a.config.SourceDigest, Entries: make([]ElevationEntry, len(a.entries))}
+	for i := range a.entries {
+		entry := &a.entries[i]
+		state.Entries[i] = ElevationEntry{
+			Enabled: entry.state.Enabled, Show: entry.state.Show,
+			Launched: entry.launched, CronTransient: entry.cronTransient,
+		}
+		if entry.ownership != domain.ManagedAndJobOwned || entry.process == nil {
+			continue
+		}
+		running, err := entry.process.running()
+		if err != nil {
+			return ElevationState{}, false, fmt.Errorf("query process for %q before elevation: %w", entry.config.Name, err)
+		}
+		if !running {
+			state.Entries[i].Enabled = false
+			state.Entries[i].Show = false
+			state.Entries[i].CronTransient = false
+			continue
+		}
+		if !entry.showPending && !entry.needsWindow {
+			hwnd := entry.hwnd
+			if !entryOwnsWindow(entry, hwnd) {
+				var err error
+				hwnd, err = findEntryWindow(entry)
+				if err != nil {
+					return ElevationState{}, false, fmt.Errorf("find window for %q before elevation: %w", entry.config.Name, err)
+				}
+			}
+			if hwnd != 0 {
+				state.Entries[i].Show = isWindowVisible(hwnd)
+			}
+		}
+	}
+	if IsElevated() {
+		if err := a.validateUnelevatedRestart(state); err != nil {
+			return ElevationState{}, false, err
+		}
+	}
+	return state, true, nil
 }
 
 func (a *TrayApp) elevateEntry(index int) error {
