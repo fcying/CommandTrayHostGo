@@ -202,6 +202,35 @@ const defaultConfigChinese = `{
 }
 `
 
+var knownConfigFields = [...]string{
+	"lang",
+	"require_admin",
+	"start_show_silent",
+	"enable_cache",
+	"conform_cache_expire",
+	"disable_cache_position",
+	"disable_cache_size",
+	"disable_cache_enabled",
+	"disable_cache_show",
+	"disable_cache_alpha",
+	"auto_hot_reloading_config",
+	"enable_hotkey",
+	"repeat_mod_hotkey",
+	"show_hotkey_in_menu",
+	"global_hotkey_alpha_step",
+	"hotkey",
+	"left_click",
+	"enable_groups",
+	"groups",
+	"groups_menu_symbol",
+	"cmd_menu_max_length",
+	"icon",
+	"icon_size",
+	"auto_update",
+	"skip_prerelease",
+	"configs",
+}
+
 var requiredEntryFields = [...]string{
 	"name",
 	"path",
@@ -212,7 +241,6 @@ var requiredEntryFields = [...]string{
 	"is_gui",
 	"enabled",
 }
-
 var knownEntryFields = [...]string{
 	"name",
 	"path",
@@ -394,46 +422,29 @@ func validateRequiredFields(data []byte) error {
 	if err := json.Unmarshal(data, &root); err != nil {
 		return fmt.Errorf("decode config fields: %w", err)
 	}
+	if err := validateUniqueJSONFields(root, "config", knownConfigFields[:]); err != nil {
+		return err
+	}
 	for key, raw := range root {
-		for _, field := range [...]string{
-			"lang",
-			"require_admin",
-			"start_show_silent",
-			"enable_cache",
-			"conform_cache_expire",
-			"disable_cache_position",
-			"disable_cache_size",
-			"disable_cache_enabled",
-			"disable_cache_show",
-			"disable_cache_alpha",
-			"auto_hot_reloading_config",
-			"enable_hotkey",
-			"repeat_mod_hotkey",
-			"show_hotkey_in_menu",
-			"global_hotkey_alpha_step",
-			"hotkey",
-			"left_click",
-			"enable_groups",
-			"groups",
-			"groups_menu_symbol",
-			"cmd_menu_max_length",
-			"icon",
-			"icon_size",
-			"auto_update",
-			"skip_prerelease",
-			"configs",
-		} {
+		for _, field := range knownConfigFields {
 			if strings.EqualFold(key, field) && string(raw) == "null" {
 				return fmt.Errorf("config field %s must not be null", key)
 			}
 		}
 	}
-	if rawHotkey, ok := findJSONField(root, "hotkey"); ok {
+	rawHotkey, ok, err := findUniqueJSONField(root, "hotkey", "config")
+	if err != nil {
+		return err
+	}
+	if ok {
 		if err := validateHotkeyObject(rawHotkey, "hotkey", globalHotkeyFields[:]); err != nil {
 			return err
 		}
 	}
-	rawConfigs, ok := findJSONField(root, "configs")
+	rawConfigs, ok, err := findUniqueJSONField(root, "configs", "config")
+	if err != nil {
+		return err
+	}
 	if !ok {
 		return errors.New("config is missing required field configs")
 	}
@@ -441,17 +452,20 @@ func validateRequiredFields(data []byte) error {
 	if err := json.Unmarshal(rawConfigs, &entries); err != nil {
 		return errors.New("config field configs must be an array of objects")
 	}
-	for _, field := range []string{"enable_groups", "groups", "groups_menu_symbol"} {
-		if _, _, err := findUniqueJSONField(root, field, "config"); err != nil {
-			return err
-		}
+	rawGroups, ok, err := findUniqueJSONField(root, "groups", "config")
+	if err != nil {
+		return err
 	}
-	if rawGroups, ok, _ := findUniqueJSONField(root, "groups", "config"); ok {
+	if ok {
 		if err := validateGroupsJSON(rawGroups); err != nil {
 			return err
 		}
 	}
+
 	for i, entry := range entries {
+		if err := validateUniqueJSONFields(entry, fmt.Sprintf("configs[%d]", i), knownEntryFields[:]); err != nil {
+			return err
+		}
 		for _, field := range requiredEntryFields {
 			if _, ok := findJSONField(entry, field); !ok {
 				return fmt.Errorf("configs[%d] is missing required field %s", i, field)
@@ -494,6 +508,9 @@ func validateCronObject(raw json.RawMessage, index int) error {
 			return fmt.Errorf("%s.need_renew is reserved for internal use", path)
 		}
 	}
+	if err := validateUniqueJSONFields(object, path, cronFields[:]); err != nil {
+		return err
+	}
 	for _, field := range [...]string{"crontab", "method", "count"} {
 		if _, ok := findJSONField(object, field); !ok {
 			return fmt.Errorf("%s is missing required field %s", path, field)
@@ -506,6 +523,9 @@ func validateHotkeyObject(raw json.RawMessage, path string, fields []string) err
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &object); err != nil {
 		return fmt.Errorf("%s must be an object", path)
+	}
+	if err := validateUniqueJSONFields(object, path, fields); err != nil {
+		return err
 	}
 	for key, value := range object {
 		for _, field := range fields {
@@ -524,6 +544,15 @@ func findJSONField(object map[string]json.RawMessage, name string) (json.RawMess
 		}
 	}
 	return nil, false
+}
+
+func validateUniqueJSONFields(object map[string]json.RawMessage, path string, fields []string) error {
+	for _, field := range fields {
+		if _, _, err := findUniqueJSONField(object, field, path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c Config) validate() error {

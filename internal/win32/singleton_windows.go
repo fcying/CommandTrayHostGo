@@ -3,8 +3,9 @@
 package win32
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
-	"strings"
 
 	"golang.org/x/sys/windows"
 )
@@ -13,8 +14,13 @@ type Instance struct {
 	handle windows.Handle
 }
 
+func instanceMutexName(executablePath string) string {
+	digest := sha256.Sum256([]byte(executablePath))
+	return "CommandTrayHostGo_" + hex.EncodeToString(digest[:])
+}
+
 func AcquireInstance(executablePath string, waitForHandoff bool) (*Instance, error) {
-	name := strings.NewReplacer(`\`, "_", ":", "_").Replace(executablePath)
+	name := instanceMutexName(executablePath)
 	namePtr, err := windows.UTF16PtrFromString(name)
 	if err != nil {
 		return nil, fmt.Errorf("create instance name: %w", err)

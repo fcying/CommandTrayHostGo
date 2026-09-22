@@ -2041,7 +2041,7 @@ func (a *TrayApp) updateConfigWatcher() error {
 	if a.watcher != nil {
 		return nil
 	}
-	watcher, err := newDirectoryWatcher(filepath.Dir(a.configPath), a.hwnd)
+	watcher, err := newDirectoryWatcher(a.configPath, a.hwnd)
 	if err != nil {
 		return err
 	}

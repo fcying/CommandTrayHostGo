@@ -21,12 +21,10 @@
 - Keep tests only for observable behavior, boundaries, and ownership invariants. Do not test field forwarding, copied defaults, or source text. Prefer proving Windows API behavior through real Windows operations.
 - Do not commit `dist/`, `*.exe`, runtime `config.json`, `*.cache`, logs, test fixtures, evidence archives, or generated `.syso` files.
 
-## Release Behavior
-
-- `.github/workflows/release.yml` runs tests, vet, the Windows build, PE resource verification, and deterministic packaging on pushes to `main` or `dev`.
-- A push to `main` creates a formal Release when the source version tag does not exist. Other pushes to `main` or `dev` publish a versioned prerelease, deleting every older prerelease first. Account for this publishing side effect before modifying or pushing either branch.
+- `.github/workflows/release.yml` runs tests, vet, the Windows build, PE resource verification, and deterministic packaging on pull requests and pushes to `main`.
+- Pull requests from this repository also generate signed manifests and publish versioned prereleases; pull requests from forks stop after build, test, and package. A push to `main` creates a formal Release when the source version tag does not exist; otherwise it publishes a versioned prerelease, deleting every older prerelease first. Account for this publishing side effect before modifying or pushing `main`.
 - The workflow fetches full Git history to inspect tags and generate release notes, and reads the build time from the current commit. Do not duplicate the version in another configuration file or maintain generated resources manually.
-- The repository is currently private. Inspecting its Actions runs and Releases requires authenticated GitHub access; an anonymous HTTP 404 does not establish that a run or Release is missing.
+- The repository is public. Use authenticated GitHub access when inspecting its Actions runs and Releases.
 
 ## Configuration and Runtime State
 
