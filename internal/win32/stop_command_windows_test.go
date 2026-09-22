@@ -123,6 +123,85 @@ func TestStopCommandFailureStillAdvancesManualRestart(t *testing.T) {
 	}
 }
 
+func TestStopCommandTimeoutStopsItsProcessTree(t *testing.T) {
+	command, process, directory := startStopTestProcess(t)
+	childScriptPath := filepath.Join(directory, "stop-child.vbs")
+	rootScriptPath := filepath.Join(directory, "stop-root.vbs")
+	childPIDPath := filepath.Join(directory, "stop-child-pid.txt")
+	if err := os.WriteFile(childScriptPath, []byte("WScript.Sleep 30000\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rootScript := "Set fso = CreateObject(\"Scripting.FileSystemObject\")\r\n" +
+		"Set child = CreateObject(\"WScript.Shell\").Exec(\"\"\"\" & WScript.Arguments(0) & \"\"\" //B //Nologo \"\"\" & WScript.Arguments(1) & \"\"\"\")\r\n" +
+		"Set file = fso.CreateTextFile(WScript.Arguments(2), True)\r\n" +
+		"file.WriteLine child.ProcessID\r\n" +
+		"file.Close\r\n" +
+		"WScript.Sleep 30000\r\n"
+	if err := os.WriteFile(rootScriptPath, []byte(rootScript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	systemDirectory, err := SystemDirectory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wscriptPath := filepath.Join(systemDirectory, "wscript.exe")
+	stopCommand := fmt.Sprintf("wscript.exe //B //Nologo \"%s\" \"%s\" \"%s\" \"%s\"", rootScriptPath, wscriptPath, childScriptPath, childPIDPath)
+	stopTimeout := int64(1000)
+	killTimeout := int64(0)
+	entry := config.EntryConfig{
+		Path:               directory,
+		Command:            "worker.exe",
+		WorkingDirectory:   directory,
+		StopCommand:        stopCommand,
+		StopCommandTimeout: &stopTimeout,
+		KillTimeout:        &killTimeout,
+	}
+	started := time.Now()
+	stopDone := make(chan error, 1)
+	go func() {
+		stopDone <- (&processController{baseDir: directory}).stop(process, entry)
+	}()
+	childDeadline := time.Now().Add(5 * time.Second)
+	var childPID uint64
+	var lastParseErr error
+	for childPID == 0 {
+		data, readErr := os.ReadFile(childPIDPath)
+		if readErr == nil {
+			value := strings.TrimSpace(string(data))
+			if value != "" {
+				childPID, lastParseErr = strconv.ParseUint(value, 10, 32)
+			}
+		} else if !errors.Is(readErr, os.ErrNotExist) {
+			t.Fatal(readErr)
+		}
+		if time.Now().After(childDeadline) {
+			if lastParseErr != nil {
+				t.Fatalf("read stop command child PID: %v", lastParseErr)
+			}
+			t.Fatal("stop command child was not started")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	childHandle, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(childPID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = windows.CloseHandle(childHandle) })
+	err = <-stopDone
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("stop error = %v, want timeout error", err)
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("stop_cmd timeout took %s", elapsed)
+	}
+	if err := command.Wait(); err != nil {
+		t.Fatalf("wait for built-in termination: %v", err)
+	}
+	if result, waitErr := windows.WaitForSingleObject(childHandle, 5000); result != windows.WAIT_OBJECT_0 {
+		t.Fatalf("stop_cmd child survived timeout: result=%d err=%v", result, waitErr)
+	}
+}
+
 func TestEmptyStopCommandUsesBuiltInTermination(t *testing.T) {
 	command, process, directory := startStopTestProcess(t)
 	timeout := int64(0)

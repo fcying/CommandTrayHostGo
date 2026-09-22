@@ -1,6 +1,8 @@
 package statecache
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -83,6 +85,48 @@ func TestRoundTripAppliesCachedStateByName(t *testing.T) {
 	}
 	if got := entry.EffectiveAlpha(); got == nil || *got != 123 {
 		t.Fatalf("cached alpha = %v, want 123", got)
+	}
+}
+func TestCacheExpiresOnSameStampConfigMutation(t *testing.T) {
+	directory := t.TempDir()
+	configPath := filepath.Join(directory, "config.json")
+	cachePath := filepath.Join(directory, "command_tray_host.cache")
+	original := []byte("config-A")
+	changed := []byte("config-B")
+	if err := os.WriteFile(configPath, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trueValue := true
+	initial := testConfig()
+	initial.EnableCache = &trueValue
+	initial.SourceDigest = sha256.Sum256(original)
+	stamp, err := config.StatFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := OpenSnapshot(cachePath, &initial, stamp, false)
+	if err != nil || store == nil {
+		t.Fatalf("OpenSnapshot initial = %v, %v", store, err)
+	}
+	if err := os.WriteFile(configPath, changed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(configPath, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := testConfig()
+	reloaded.EnableCache = &trueValue
+	reloaded.SourceDigest = sha256.Sum256(changed)
+	stamp, err = config.StatFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenSnapshot(cachePath, &reloaded, stamp, false); !errors.Is(err, ErrCacheExpired) {
+		t.Fatalf("OpenSnapshot same-stamp mutation error = %v, want ErrCacheExpired", err)
 	}
 }
 
@@ -359,6 +403,63 @@ func TestLoadRejectsMissingRequiredCacheFields(t *testing.T) {
 	}
 	if _, err := load(path); err == nil {
 		t.Fatal("load succeeded, want missing field error")
+	}
+}
+
+func TestOpenMigratesCacheWithoutSourceDigest(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cachePath := filepath.Join(dir, "command_tray_host.cache")
+	rawConfig := []byte("{}")
+	if err := os.WriteFile(configPath, rawConfig, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	trueValue := true
+	cfg := testConfig()
+	cfg.EnableCache = &trueValue
+	cfg.SourceDigest = sha256.Sum256(rawConfig)
+	info, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamp := config.FileStamp{ModTime: info.ModTime().UnixNano(), Size: info.Size(), Digest: cfg.SourceDigest}
+	legacy := struct {
+		ConfigModTime int64   `json:"config_mod_time"`
+		ConfigSize    int64   `json:"config_size"`
+		Configs       []entry `json:"configs"`
+	}{
+		ConfigModTime: stamp.ModTime,
+		ConfigSize:    stamp.Size,
+		Configs: []entry{{
+			Name: "demo", Enabled: true, Alpha: 255,
+		}},
+	}
+	data, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cachePath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := load(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.HasSourceDigest {
+		t.Fatal("legacy cache unexpectedly contains source_digest")
+	}
+	if _, err := OpenSnapshot(cachePath, &cfg, stamp, false); err != nil {
+		t.Fatal(err)
+	}
+	after, err := load(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.HasSourceDigest || after.SourceDigest != cfg.SourceDigest {
+		t.Fatalf("migrated cache digest = (%v, %v), want (%v, true)", after.SourceDigest, after.HasSourceDigest, cfg.SourceDigest)
+	}
+	if _, err := OpenSnapshot(cachePath, &cfg, stamp, false); err != nil {
+		t.Fatal(err)
 	}
 }
 

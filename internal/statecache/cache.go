@@ -40,14 +40,17 @@ type Store struct {
 	dirty         bool
 	configModTime int64
 	configSize    int64
+	configDigest  [32]byte
 }
 
 type fileData struct {
-	ConfigModTime    int64   `json:"config_mod_time"`
-	HasConfigModTime bool    `json:"-"`
-	ConfigSize       int64   `json:"config_size"`
-	HasConfigSize    bool    `json:"-"`
-	Configs          []entry `json:"configs"`
+	ConfigModTime    int64    `json:"config_mod_time"`
+	HasConfigModTime bool     `json:"-"`
+	ConfigSize       int64    `json:"config_size"`
+	HasConfigSize    bool     `json:"-"`
+	SourceDigest     [32]byte `json:"source_digest"`
+	HasSourceDigest  bool     `json:"-"`
+	Configs          []entry  `json:"configs"`
 }
 
 type entry struct {
@@ -95,6 +98,10 @@ func OpenSnapshot(cachePath string, cfg *config.Config, stamp config.FileStamp, 
 	store := newStore(cachePath, cfg)
 	store.configModTime = stamp.ModTime
 	store.configSize = stamp.Size
+	store.configDigest = cfg.SourceDigest
+	if store.configDigest == ([32]byte{}) {
+		store.configDigest = stamp.Digest
+	}
 	cacheInfo, err := os.Stat(cachePath)
 	if errors.Is(err, os.ErrNotExist) {
 		return store, store.Save()
@@ -110,7 +117,9 @@ func OpenSnapshot(cachePath string, cfg *config.Config, stamp config.FileStamp, 
 		return store, fmt.Errorf("invalid cache was discarded: %w", err)
 	}
 	expired := false
-	if data.HasConfigModTime {
+	if data.HasSourceDigest && data.SourceDigest != ([32]byte{}) && store.configDigest != ([32]byte{}) {
+		expired = data.SourceDigest != store.configDigest
+	} else if data.HasConfigModTime {
 		expired = data.ConfigModTime != store.configModTime || (data.HasConfigSize && data.ConfigSize != store.configSize)
 	} else {
 		expired = cacheInfo.ModTime().UnixNano() <= stamp.ModTime
@@ -120,6 +129,9 @@ func OpenSnapshot(cachePath string, cfg *config.Config, stamp config.FileStamp, 
 	}
 	store.dirty = false
 	if data.HasConfigModTime && !data.HasConfigSize {
+		store.dirty = true
+	}
+	if !data.HasSourceDigest && store.configDigest != ([32]byte{}) {
 		store.dirty = true
 	}
 	if store.merge(data.Configs) {
@@ -164,6 +176,10 @@ func Rebase(cachePath string, cfg *config.Config, stamp config.FileStamp, previo
 	store := newStore(cachePath, cfg)
 	store.configModTime = stamp.ModTime
 	store.configSize = stamp.Size
+	store.configDigest = cfg.SourceDigest
+	if store.configDigest == ([32]byte{}) {
+		store.configDigest = stamp.Digest
+	}
 	if policy == KeepPrevious && cfg.CacheEnabled() {
 		if previous != nil {
 			store.mergePrevious(previous)
@@ -244,6 +260,15 @@ func load(path string) (fileData, error) {
 			return fileData{}, errors.New("cache field config_size must be a non-negative integer")
 		}
 		data.HasConfigSize = true
+	}
+	if rawSourceDigest, exists := root["source_digest"]; exists {
+		if string(rawSourceDigest) == "null" {
+			return fileData{}, errors.New("cache field source_digest must not be null")
+		}
+		if err := json.Unmarshal(rawSourceDigest, &data.SourceDigest); err != nil {
+			return fileData{}, errors.New("cache field source_digest must be a 32-byte array")
+		}
+		data.HasSourceDigest = true
 	}
 	for i, rawEntry := range rawEntries {
 		var fields map[string]json.RawMessage
@@ -478,7 +503,7 @@ func (s *Store) Save() error {
 	tempPath := temp.Name()
 	defer os.Remove(tempPath)
 	encoder := json.NewEncoder(temp)
-	if err := encoder.Encode(fileData{ConfigModTime: s.configModTime, ConfigSize: s.configSize, Configs: s.entries}); err != nil {
+	if err := encoder.Encode(fileData{ConfigModTime: s.configModTime, ConfigSize: s.configSize, SourceDigest: s.configDigest, Configs: s.entries}); err != nil {
 		temp.Close()
 		return fmt.Errorf("encode cache: %w", err)
 	}

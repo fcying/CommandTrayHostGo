@@ -5,15 +5,18 @@ package win32
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"golang.org/x/sys/windows"
 )
 
 type directoryWatcher struct {
-	change windows.Handle
-	stop   windows.Handle
-	done   chan struct{}
-	once   sync.Once
+	change         windows.Handle
+	stop           windows.Handle
+	done           chan struct{}
+	once           sync.Once
+	closeRequested atomic.Bool
+	signalStop     func(windows.Handle) error
 }
 
 func newDirectoryWatcher(path string, hwnd uintptr) (*directoryWatcher, error) {
@@ -38,22 +41,33 @@ func newDirectoryWatcher(path string, hwnd uintptr) (*directoryWatcher, error) {
 func (w *directoryWatcher) run(hwnd uintptr) {
 	defer close(w.done)
 	for {
-		event, err := windows.WaitForMultipleObjects([]windows.Handle{w.change, w.stop}, false, windows.INFINITE)
+		event, err := windows.WaitForMultipleObjects([]windows.Handle{w.change, w.stop}, false, 100)
 		if err != nil {
-			postWindowMessage(hwnd, wmConfigWatcherFailed)
+			if !w.closeRequested.Load() {
+				postWindowMessage(hwnd, wmConfigWatcherFailed)
+			}
+			return
+		}
+		if w.closeRequested.Load() {
 			return
 		}
 		switch event {
 		case windows.WAIT_OBJECT_0:
 			if err := windows.FindNextChangeNotification(w.change); err != nil {
-				postWindowMessage(hwnd, wmConfigWatcherFailed)
+				if !w.closeRequested.Load() {
+					postWindowMessage(hwnd, wmConfigWatcherFailed)
+				}
 				return
 			}
 			postWindowMessage(hwnd, wmConfigDirectoryChanged)
 		case windows.WAIT_OBJECT_0 + 1:
 			return
+		case uint32(windows.WAIT_TIMEOUT):
+			continue
 		default:
-			postWindowMessage(hwnd, wmConfigWatcherFailed)
+			if !w.closeRequested.Load() {
+				postWindowMessage(hwnd, wmConfigWatcherFailed)
+			}
 			return
 		}
 	}
@@ -65,11 +79,13 @@ func (w *directoryWatcher) Close() error {
 	}
 	var closeErr error
 	w.once.Do(func() {
-		if err := windows.SetEvent(w.stop); err != nil {
+		w.closeRequested.Store(true)
+		signalStop := w.signalStop
+		if signalStop == nil {
+			signalStop = windows.SetEvent
+		}
+		if err := signalStop(w.stop); err != nil {
 			closeErr = fmt.Errorf("stop config directory watcher: %w", err)
-			_ = windows.FindCloseChangeNotification(w.change)
-			_ = windows.CloseHandle(w.stop)
-			return
 		}
 		<-w.done
 		_ = windows.FindCloseChangeNotification(w.change)

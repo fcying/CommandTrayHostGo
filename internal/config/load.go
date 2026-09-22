@@ -23,10 +23,49 @@ import (
 type FileStamp struct {
 	ModTime int64
 	Size    int64
+	Digest  [32]byte
+}
+
+func (s FileStamp) MetadataEqual(other FileStamp) bool {
+	return s.ModTime == other.ModTime && s.Size == other.Size
 }
 
 func (s FileStamp) Equal(other FileStamp) bool {
-	return s == other
+	return s.MetadataEqual(other) && (s.Digest == ([32]byte{}) || other.Digest == ([32]byte{}) || s.Digest == other.Digest)
+}
+
+func DigestFile(path string) ([32]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("open %s for digest: %w", path, err)
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, maxConfigSize+1))
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("read %s for digest: %w", path, err)
+	}
+	if len(raw) > maxConfigSize {
+		return [32]byte{}, fmt.Errorf("%s exceeds the %d MiB limit", path, maxConfigSize>>20)
+	}
+	return sha256.Sum256(raw), nil
+}
+
+func MatchesFile(path string, expected FileStamp) (bool, error) {
+	current, err := StatFile(path)
+	if err != nil {
+		return false, err
+	}
+	if !current.MetadataEqual(expected) {
+		return false, nil
+	}
+	if expected.Digest == ([32]byte{}) {
+		return true, nil
+	}
+	digest, err := DigestFile(path)
+	if err != nil {
+		return false, err
+	}
+	return digest == expected.Digest, nil
 }
 
 const (
@@ -193,6 +232,7 @@ var knownEntryFields = [...]string{
 	"not_host_by_commandtrayhost",
 	"not_monitor_by_commandtrayhost",
 	"stop_cmd",
+	"stop_cmd_timeout",
 	"kill_timeout",
 	"kill_process_tree",
 	"exclusion_id",
@@ -266,7 +306,8 @@ func LoadOrCreateSnapshot(path string, language i18n.Language, systemDirectory f
 		if err != nil {
 			return Config{}, before, err
 		}
-		if before.Equal(after) {
+		if before.MetadataEqual(after) {
+			after.Digest = cfg.SourceDigest
 			return cfg, after, nil
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -288,7 +329,8 @@ func LoadSnapshot(path string) (Config, FileStamp, error) {
 		if err != nil {
 			return Config{}, before, err
 		}
-		if before.Equal(after) {
+		if before.MetadataEqual(after) {
+			after.Digest = cfg.SourceDigest
 			return cfg, after, nil
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -517,6 +559,9 @@ func (c Config) validate() error {
 		}
 		if strings.IndexByte(entry.StopCommand, 0) >= 0 {
 			return fmt.Errorf("configs[%d].stop_cmd must not contain NUL", i)
+		}
+		if entry.StopCommandTimeout != nil && (*entry.StopCommandTimeout < 0 || *entry.StopCommandTimeout >= int64(^uint32(0))) {
+			return fmt.Errorf("configs[%d].stop_cmd_timeout must be between 0 and %d", i, uint64(^uint32(0)-1))
 		}
 		if entry.KillTimeout != nil && (*entry.KillTimeout < 0 || *entry.KillTimeout >= int64(^uint32(0))) {
 			return fmt.Errorf("configs[%d].kill_timeout must be between 0 and %d", i, uint64(^uint32(0)-1))

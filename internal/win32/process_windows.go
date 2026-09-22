@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	domain "github.com/fcying/CommandTrayHostGo/internal/app"
@@ -479,18 +480,135 @@ func (c *processController) runStopCommand(entry config.EntryConfig) error {
 	if err != nil {
 		return fmt.Errorf("resolve System32 for stop_cmd: %w", err)
 	}
-	command := exec.Command(filepath.Join(systemDirectory, "cmd.exe"))
-	command.Args = nil
-	command.Dir = workingDirectory
-	// cmd.exe does not use CommandLineToArgvW; provide its command line verbatim.
-	command.SysProcAttr = &syscall.SysProcAttr{
-		CmdLine:    `/d /s /c "` + entry.StopCommand + `"`,
-		HideWindow: true,
+	executable, err := windows.UTF16PtrFromString(filepath.Join(systemDirectory, "cmd.exe"))
+	if err != nil {
+		return fmt.Errorf("encode stop_cmd executable: %w", err)
 	}
-	if err := command.Run(); err != nil {
+	commandLine, err := windows.UTF16FromString(`/d /s /c "` + entry.StopCommand + `"`)
+	if err != nil {
+		return fmt.Errorf("encode stop_cmd command line: %w", err)
+	}
+	workingDirectoryPtr, err := windows.UTF16PtrFromString(workingDirectory)
+	if err != nil {
+		return fmt.Errorf("encode stop_cmd working directory: %w", err)
+	}
+	startup := windows.StartupInfo{
+		Cb:         uint32(unsafe.Sizeof(windows.StartupInfo{})),
+		Flags:      windows.STARTF_USESHOWWINDOW,
+		ShowWindow: windows.SW_HIDE,
+	}
+	creationFlags := uint32(windows.CREATE_NEW_CONSOLE | windows.CREATE_BREAKAWAY_FROM_JOB | windows.CREATE_SUSPENDED)
+	var processInfo windows.ProcessInformation
+	for range 2 {
+		err = windows.CreateProcess(
+			executable,
+			&commandLine[0],
+			nil,
+			nil,
+			false,
+			creationFlags,
+			nil,
+			workingDirectoryPtr,
+			&startup,
+			&processInfo,
+		)
+		if !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+			break
+		}
+		creationFlags &^= windows.CREATE_BREAKAWAY_FROM_JOB
+	}
+	runtime.KeepAlive(executable)
+	runtime.KeepAlive(commandLine)
+	runtime.KeepAlive(workingDirectoryPtr)
+	if err != nil {
 		return fmt.Errorf("run stop_cmd: %w", err)
 	}
-	return nil
+
+	job, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		terminateStartedProcess(processInfo.Process, processInfo.Thread)
+		return fmt.Errorf("create stop_cmd job: %w", err)
+	}
+	defer func() {
+		if processInfo.Thread != 0 {
+			_ = windows.CloseHandle(processInfo.Thread)
+		}
+		if processInfo.Process != 0 {
+			_ = windows.CloseHandle(processInfo.Process)
+		}
+		_ = windows.CloseHandle(job)
+	}()
+	limits := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
+	limits.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+	if _, err := windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&limits)), uint32(unsafe.Sizeof(limits))); err != nil {
+		_ = windows.TerminateProcess(processInfo.Process, 1)
+		_, _ = windows.WaitForSingleObject(processInfo.Process, 5000)
+		return fmt.Errorf("configure stop_cmd job: %w", err)
+	}
+	if err := windows.AssignProcessToJobObject(job, processInfo.Process); err != nil {
+		_ = windows.TerminateProcess(processInfo.Process, 1)
+		_, _ = windows.WaitForSingleObject(processInfo.Process, 5000)
+		return fmt.Errorf("assign stop_cmd job: %w", err)
+	}
+	if _, err := windows.ResumeThread(processInfo.Thread); err != nil {
+		_ = windows.TerminateJobObject(job, 1)
+		_, _ = windows.WaitForSingleObject(processInfo.Process, 5000)
+		return fmt.Errorf("resume stop_cmd: %w", err)
+	}
+	waitResult, waitErr := windows.WaitForSingleObject(processInfo.Process, stopCommandWaitMilliseconds(entry.EffectiveStopCommandTimeout()))
+	switch waitResult {
+	case windows.WAIT_OBJECT_0:
+		var exitCode uint32
+		if err := windows.GetExitCodeProcess(processInfo.Process, &exitCode); err != nil {
+			return fmt.Errorf("read stop_cmd exit status: %w", err)
+		}
+		if exitCode != 0 {
+			return fmt.Errorf("run stop_cmd: exit code %d", exitCode)
+		}
+		return nil
+	case uint32(windows.WAIT_TIMEOUT):
+		timeoutErr := fmt.Errorf("run stop_cmd timed out after %s", entry.EffectiveStopCommandTimeout())
+		if err := windows.TerminateJobObject(job, 1); err != nil {
+			timeoutErr = errors.Join(timeoutErr, fmt.Errorf("terminate stop_cmd process tree: %w", err))
+		}
+		if result, err := windows.WaitForSingleObject(processInfo.Process, 5000); result != windows.WAIT_OBJECT_0 {
+			if err != nil {
+				timeoutErr = errors.Join(timeoutErr, fmt.Errorf("wait for terminated stop_cmd: %w", err))
+			} else {
+				timeoutErr = errors.Join(timeoutErr, errors.New("terminated stop_cmd did not exit"))
+			}
+		}
+		return timeoutErr
+	default:
+		return fmt.Errorf("wait for stop_cmd: %w", waitErr)
+	}
+}
+
+func stopCommandWaitMilliseconds(timeout time.Duration) uint32 {
+	if timeout <= 0 {
+		return 0
+	}
+	milliseconds := timeout / time.Millisecond
+	if milliseconds == 0 {
+		return 1
+	}
+	if milliseconds >= time.Duration(^uint32(0)) {
+		return ^uint32(0)
+	}
+	return uint32(milliseconds)
+}
+
+func terminateStartedProcess(process, thread windows.Handle) {
+	if process != 0 {
+		_ = windows.TerminateProcess(process, 1)
+		_, _ = windows.WaitForSingleObject(process, 5000)
+	}
+	if thread != 0 {
+		_ = windows.CloseHandle(thread)
+	}
+	if process != 0 {
+		_ = windows.CloseHandle(process)
+	}
 }
 
 func (p *childProcess) Stop(timeout uint32, killTree, isGUI bool) error {
