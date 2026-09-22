@@ -229,15 +229,15 @@ A hotkey cannot be assigned to more than one action.
 | Field | Default | Description |
 |---|---:|---|
 | `auto_update` | `true` | Check GitHub Releases at startup for comparable builds. The generated test configuration explicitly sets this to `false`. |
-| `skip_prerelease` | `true` | Ignore prereleases. Set to `false` to select the latest signed prerelease only when it is newer than the current version. |
+| `skip_prerelease` | `true` | Ignore prereleases by default. Set to `false` to include signed prereleases in update checks. |
 
-Only SemVer tags such as `v1.2.3`, `v1.2.3-rc.1`, and `v1.2.3-dev.g<commit>` are accepted. Each checker is bound to one validated `owner/repository` identity and returns one explicit outcome: unknown current version, up to date, or update available.
+Only SemVer release versions such as `v1.2.3`, `v1.2.3-rc.1`, and `v1.2.3-dev.g<commit>` are accepted. The rolling GitHub `dev` tag is also accepted when its prerelease title contains a SemVer version; assets are downloaded under `dev` and verified against that title version. Each checker is bound to one validated `owner/repository` identity and returns one explicit outcome: unknown current version, up to date, or update available.
 
 - Requests use the GitHub Releases API over HTTPS, accept at most 1 MiB of JSON, and reject redirects outside `https://api.github.com`.
-- Draft releases and unsupported tags are ignored. Each prerelease publish, including same-repository pull-request publishes, deletes older prereleases; other and fork pull requests run checks without publishing. `skip_prerelease=true` excludes prereleases; setting it to `false` selects the newest remaining prerelease and updates only when it is newer than the current version.
-- Prerelease publication enumerates all release pages before deleting existing prereleases and their tags, including the same commit tag on a rerun. Formal releases are retained.
+- Draft releases and unsupported tags are ignored. The rolling `dev` prerelease is replaced on each prerelease publish, including same-repository pull-request publishes; other and fork pull requests run checks without publishing. `skip_prerelease=true` excludes prereleases; setting it to `false` includes the rolling `dev` prerelease. A `dev` release with a newer base version is accepted, while a same-base development build updates whenever its version differs from the current prerelease. Older base versions are never installed.
+- Prerelease publication enumerates all release pages before deleting existing prereleases and their tags, including the rolling `dev` tag on a rerun. Formal releases are retained.
 - Transport errors, HTTP 408/5xx, and confirmed 403/429 rate limits are retried at most five times. Server retry headers take precedence; every wait is context-cancellable.
-- Development builds do not check automatically. A manual check may report the latest release without claiming that the current version is comparable.
+- Comparable development builds can check the rolling `dev` prerelease when `skip_prerelease=false`. Non-comparable development builds do not check automatically. A manual check may report the latest release without claiming that the current version is comparable.
 - When an update is confirmed, the client downloads the canonical signed manifest and package, verifies their signature and SHA-256 digests, then replaces and restarts the EXE.
 - The restarted application waits for the update helper to exit before removing the helper executable and `.previous` backup. Cleanup errors are shown in a message box.
 - If installation fails, the helper restarts the existing or successfully restored previous executable with the original configuration and startup user SID. Failed rollback preserves the backup and does not launch an unverified target; installation and recovery errors are reported together. Failed transactions may retain their temporary files for recovery.
@@ -375,7 +375,7 @@ The right-click menu contains:
 - Docked Windows.
 - Exit.
 
-When a newer compatible release is available, Check for Updates downloads its signed manifest and package over HTTPS, verifies the Ed25519 signature and both SHA-256 digests, then exits, replaces the EXE, and restarts. Development builds are never installed automatically because their version cannot be compared safely.
+When a newer compatible release is available, Check for Updates downloads its signed manifest and package over HTTPS, verifies the Ed25519 signature and both SHA-256 digests, then exits, replaces the EXE, and restarts. This includes the rolling `dev` prerelease when the current development build is comparable and `skip_prerelease=false`; non-comparable development builds are not installed automatically.
 
 Selecting an entry path opens its directory. Selecting its cmd locates the executable in Explorer.
 

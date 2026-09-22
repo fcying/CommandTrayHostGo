@@ -57,7 +57,8 @@ jobs:
             $releaseTag = $sourceVersion
           } else {
             $version = "$sourceVersion-dev.g$($target.Substring(0, 12))"
-            $releaseTag = $version
+            # Keep the comparable SemVer in the build and manifest; use one rolling tag for dev prereleases.
+            $releaseTag = "dev"
           }
           $packagePath = "release/CommandTrayHostGo-$version-windows-amd64.zip"
           $manifestPath = "release/CommandTrayHostGo-$version-update.json"
@@ -85,6 +86,8 @@ jobs:
           go run ./cmd/releasetool pe-resources --exe release/CommandTrayHostGo.exe --version $version
           go run ./cmd/releasetool package --exe release/CommandTrayHostGo.exe --license LICENSE --out $packagePath --modified $buildTime
 
+      # Same-repository PRs are trusted release inputs: they may use the signing secret and publish a prerelease.
+      # Fork PRs intentionally remain build/test-only because the repository check below is false.
       - name: Generate signed update manifest
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         shell: pwsh

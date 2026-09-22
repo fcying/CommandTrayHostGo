@@ -20,6 +20,7 @@ const (
 	maxCheckAttempts        = 5
 	checkRetryDelay         = 15 * time.Second
 	secondaryRateLimitDelay = time.Minute
+	developmentReleaseTag   = "dev"
 )
 
 var (
@@ -47,6 +48,7 @@ type CheckOptions struct {
 
 type Release struct {
 	Tag           string
+	Version       string
 	URL           string
 	Prerelease    bool
 	parsedVersion Version
@@ -69,6 +71,7 @@ type Checker struct {
 
 type githubRelease struct {
 	TagName    string `json:"tag_name"`
+	Name       string `json:"name"`
 	Draft      bool   `json:"draft"`
 	Prerelease bool   `json:"prerelease"`
 }
@@ -170,6 +173,15 @@ func (c *Checker) checkOnce(ctx context.Context, options CheckOptions) (Result, 
 		return result, nil
 	}
 	currentVersion, _ := ParseVersion(options.CurrentVersion)
+	if latest.Tag == developmentReleaseTag {
+		baseComparison := compareBase(latest.parsedVersion, currentVersion)
+		if baseComparison > 0 || (baseComparison == 0 && len(currentVersion.prerelease) > 0 && latest.Version != options.CurrentVersion) {
+			result.Outcome = OutcomeUpdateAvailable
+		} else {
+			result.Outcome = OutcomeUpToDate
+		}
+		return result, nil
+	}
 	if Compare(latest.parsedVersion, currentVersion) > 0 {
 		result.Outcome = OutcomeUpdateAvailable
 	} else {
@@ -204,11 +216,24 @@ func (c *Checker) selectLatest(releases []githubRelease, skipPrereleases bool) (
 		if release.Draft || skipPrereleases && release.Prerelease {
 			continue
 		}
-		version, err := ParseVersion(release.TagName)
-		if err != nil {
+		versionText := release.TagName
+		if release.TagName == developmentReleaseTag {
+			if !release.Prerelease {
+				continue
+			}
+			versionText = release.Name
+		}
+		version, err := ParseVersion(versionText)
+		if err != nil || release.TagName == developmentReleaseTag && len(version.prerelease) == 0 {
 			continue
 		}
-		candidate := Release{Tag: release.TagName, URL: c.releasesURL + "/tag/" + url.PathEscape(release.TagName), Prerelease: release.Prerelease, parsedVersion: version}
+		candidate := Release{
+			Tag:           release.TagName,
+			Version:       versionText,
+			URL:           c.releasesURL + "/tag/" + url.PathEscape(release.TagName),
+			Prerelease:    release.Prerelease,
+			parsedVersion: version,
+		}
 		if !skipPrereleases && candidate.Prerelease {
 			return candidate, nil
 		}

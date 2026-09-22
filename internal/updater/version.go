@@ -39,6 +39,16 @@ func Compare(left, right Version) int {
 	return comparePrerelease(left.prerelease, right.prerelease)
 }
 
+func compareBase(left, right Version) int {
+	if comparison := compareNumericString(left.major, right.major); comparison != 0 {
+		return comparison
+	}
+	if comparison := compareNumericString(left.minor, right.minor); comparison != 0 {
+		return comparison
+	}
+	return compareNumericString(left.patch, right.patch)
+}
+
 func parseSemver(value string) (Version, bool) {
 	if !strings.HasPrefix(value, "v") {
 		return Version{}, false

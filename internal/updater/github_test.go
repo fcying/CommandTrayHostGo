@@ -76,6 +76,29 @@ func TestCheckerUpdatesToDifferentSelectedPrerelease(t *testing.T) {
 		}
 	}
 }
+func TestCheckerSelectsRollingDevReleaseVersion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		writeJSON(response, `[{"tag_name":"dev","name":"v1.0.0-dev.g000000000001","draft":false,"prerelease":true}]`)
+	}))
+	defer server.Close()
+	checker := checkerForServer(t, server)
+	for _, test := range []struct {
+		current string
+		outcome Outcome
+	}{
+		{current: "v1.0.0-dev.gffffffffffff", outcome: OutcomeUpdateAvailable},
+		{current: "v1.0.0-dev.g000000000001", outcome: OutcomeUpToDate},
+		{current: "v1.0.1-dev.g000000000001", outcome: OutcomeUpToDate},
+		{current: "v1.0.0", outcome: OutcomeUpToDate},
+		{current: "v0.9.0", outcome: OutcomeUpdateAvailable},
+	} {
+		result, err := checker.Check(context.Background(), CheckOptions{CurrentVersion: test.current})
+		if err != nil || result.Latest.Tag != "dev" || result.Latest.Version != "v1.0.0-dev.g000000000001" || result.Latest.URL != "https://github.com/owner/repository/releases/tag/dev" || result.Outcome != test.outcome {
+			t.Fatalf("Check(%q) = %+v, %v", test.current, result, err)
+		}
+	}
+}
+
 func TestCheckerDoesNotDowngradeToOlderPrerelease(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		writeJSON(response, `[{"tag_name":"v2.0.0-dev.1","draft":false,"prerelease":true}]`)
