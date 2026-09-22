@@ -236,6 +236,13 @@ func TestUpdateOptions(t *testing.T) {
 	if cfg.AutoUpdateEnabled() || cfg.SkipPrereleases() {
 		t.Fatalf("update options = auto:%v skip:%v", cfg.AutoUpdateEnabled(), cfg.SkipPrereleases())
 	}
+	cfg, err = parseWithRootFields(`"skip_prerelease": true`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.SkipPrereleases() {
+		t.Fatal("skip_prerelease=true was not applied")
+	}
 	for _, fields := range []string{
 		`"auto_update": null`,
 		`"skip_prerelease": null`,

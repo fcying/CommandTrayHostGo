@@ -194,23 +194,23 @@ func (a *TrayApp) resumeUpdateUI() {
 	result := pending.result
 	switch result.Outcome {
 	case updater.OutcomeCurrentVersionUnknown:
-		if pending.manual && ShowConfirm(productName, fmt.Sprintf(text.UpdateVersionUnknown, result.CurrentVersion, result.Latest.Tag)) {
+		if pending.manual && ShowConfirm(productName, fmt.Sprintf(text.UpdateVersionUnknown, result.CurrentVersion, result.Latest.Version)) {
 			a.openUpdatePage(result.Latest.URL)
 		}
 	case updater.OutcomeUpToDate:
 		if pending.manual {
-			ShowInfo(productName, fmt.Sprintf(text.NoUpdates, result.CurrentVersion, result.Latest.Tag))
+			ShowInfo(productName, fmt.Sprintf(text.NoUpdates, result.CurrentVersion, result.Latest.Version))
 		}
 	case updater.OutcomeUpdateAvailable:
-		if ShowConfirm(productName, fmt.Sprintf(text.UpdateAvailable, result.Latest.Tag, result.CurrentVersion)) {
-			if err := a.installUpdate(result.Latest.Tag); err != nil {
+		if ShowConfirm(productName, fmt.Sprintf(text.UpdateAvailable, result.Latest.Version, result.CurrentVersion)) {
+			if err := a.installUpdate(result.Latest); err != nil {
 				ShowError(productName, err.Error())
 			}
 		}
 	}
 }
 
-func (a *TrayApp) installUpdate(version string) error {
+func (a *TrayApp) installUpdate(release updater.Release) error {
 	if a.closing.Load() || a.closed || a.sessionEndPending {
 		return nil
 	}
@@ -233,7 +233,7 @@ func (a *TrayApp) installUpdate(version string) error {
 			result.err = err
 			return result
 		}
-		result.err = updater.DownloadVerified(ctx, updater.Repository, version, result.updatePath)
+		result.err = updater.DownloadVerified(ctx, updater.Repository, release.Tag, release.Version, result.updatePath)
 		return result
 	})
 	return nil

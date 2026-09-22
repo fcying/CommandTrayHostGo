@@ -19,12 +19,21 @@ import (
 
 // DownloadVerified fetches a signed Windows update package and writes its executable
 // to destination. destination must not exist.
-func DownloadVerified(ctx context.Context, repository, version, destination string) error {
+func DownloadVerified(ctx context.Context, repository, tag, version, destination string) error {
 	if err := ValidateRepository(repository); err != nil {
 		return err
 	}
 	if err := ValidateReleaseVersion(version); err != nil {
 		return err
+	}
+	if tag != version {
+		if tag != developmentReleaseTag {
+			return errors.New("update release tag does not match its version")
+		}
+		parsed, _ := ParseVersion(version)
+		if len(parsed.prerelease) == 0 {
+			return errors.New("dev release version must be a prerelease")
+		}
 	}
 	if destination == "" {
 		return errors.New("update destination is required")
@@ -33,7 +42,7 @@ func DownloadVerified(ctx context.Context, repository, version, destination stri
 	if err != nil {
 		return fmt.Errorf("decode embedded update public key: %w", err)
 	}
-	base := "https://github.com/" + repository + "/releases/download/" + url.PathEscape(version) + "/"
+	base := "https://github.com/" + repository + "/releases/download/" + url.PathEscape(tag) + "/"
 	manifestName := "CommandTrayHostGo-" + version + "-update.json"
 	manifest, err := downloadUpdateAsset(ctx, base+manifestName, maxAPIBytes)
 	if err != nil {
