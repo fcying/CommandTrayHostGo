@@ -234,7 +234,7 @@ A hotkey cannot be assigned to more than one action.
 Only SemVer tags such as `v1.2.3`, `v1.2.3-rc.1`, and `v1.2.3-dev.g<commit>` are accepted. Each checker is bound to one validated `owner/repository` identity and returns one explicit outcome: unknown current version, up to date, or update available.
 
 - Requests use the GitHub Releases API over HTTPS, accept at most 1 MiB of JSON, and reject redirects outside `https://api.github.com`.
-- Draft releases and unsupported tags are ignored. Each dev publish deletes older prereleases. `skip_prerelease=true` excludes prereleases; setting it to `false` selects the newest remaining prerelease and updates only when it is newer than the current version.
+- Draft releases and unsupported tags are ignored. Each prerelease publish, including same-repository pull-request publishes, deletes older prereleases; other and fork pull requests run checks without publishing. `skip_prerelease=true` excludes prereleases; setting it to `false` selects the newest remaining prerelease and updates only when it is newer than the current version.
 - Prerelease publication enumerates all release pages before deleting existing prereleases and their tags, including the same commit tag on a rerun. Formal releases are retained.
 - Transport errors, HTTP 408/5xx, and confirmed 403/429 rate limits are retried at most five times. Server retry headers take precedence; every wait is context-cancellable.
 - Development builds do not check automatically. A manual check may report the latest release without claiming that the current version is comparable.

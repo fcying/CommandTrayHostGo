@@ -236,7 +236,7 @@ enabled
 只接受 `v1.2.3`、`v1.2.3-rc.1` 和 `v1.2.3-dev.g<commit>` 等 SemVer tag. 每个 checker 固定绑定一个通过校验的 `owner/repository` 身份, 并只返回三种明确结果: 当前版本未知、已是最新或存在更新.
 
 - 请求仅通过 HTTPS 访问 GitHub Releases API, 最多接受 1 MiB JSON, 并拒绝跳转到 `https://api.github.com` 之外的地址.
-- draft release 和不支持的 tag 会被忽略. 每次 dev 发布都会删除旧 prerelease. `skip_prerelease=true` 排除 prerelease; 设为 `false` 时选择唯一保留的最新 prerelease, 但只有其版本高于当前版本才更新.
+- draft release 和不支持的 tag 会被忽略. 每次 prerelease 发布, 包括同仓库 PR 发布, 都会删除旧 prerelease; 其他 PR 和 fork PR 只运行检查, 不发布. `skip_prerelease=true` 排除 prerelease; 设为 `false` 时选择唯一保留的最新 prerelease, 但只有其版本高于当前版本才更新.
 - 预发布流程先完整分页获取 Release, 再删除现有 prerelease 及其 tag, 包括重跑时的同提交 tag. 正式 Release 不删除.
 - 传输错误、HTTP 408/5xx 及确认属于限流的 403/429 最多重试五次. 服务端 retry header 优先, 所有等待均可通过 context 取消.
 - 开发构建不会自动检查. 手动检查可以显示最新 release, 但不会声称当前版本可比较.

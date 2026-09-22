@@ -1,10 +1,11 @@
 name: Release
 
 on:
+  pull_request:
   push:
     branches:
       - main
-      - dev
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -27,6 +28,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
@@ -36,10 +39,16 @@ jobs:
 
       - name: Test, build, and package
         shell: pwsh
-        env:
-          CTH_UPDATE_PRIVATE_KEY: ${{ secrets.CTH_UPDATE_PRIVATE_KEY }}
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
+          $target = $env:GITHUB_SHA
+          if ($env:GITHUB_EVENT_NAME -eq "pull_request") {
+            $event = Get-Content -LiteralPath $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json
+            $target = $event.pull_request.head.sha
+          }
+          if ([string]::IsNullOrWhiteSpace($target) -or $target.Length -lt 12) {
+            throw "Cannot determine a valid build target commit"
+          }
           $sourceVersion = (& go run ./cmd/releasetool source-version --source internal/app/about.go).Trim()
 
           $tagExists = (git tag --list $sourceVersion) -eq $sourceVersion
@@ -47,12 +56,13 @@ jobs:
             $version = $sourceVersion
             $releaseTag = $sourceVersion
           } else {
-            $version = "$sourceVersion-dev.g$($env:GITHUB_SHA.Substring(0, 12))"
+            $version = "$sourceVersion-dev.g$($target.Substring(0, 12))"
             $releaseTag = $version
           }
           $packagePath = "release/CommandTrayHostGo-$version-windows-amd64.zip"
           $manifestPath = "release/CommandTrayHostGo-$version-update.json"
           $signaturePath = "$manifestPath.sig"
+          "TARGET=$target" >> $env:GITHUB_ENV
           "VERSION=$version" >> $env:GITHUB_ENV
           "RELEASE_TAG=$releaseTag" >> $env:GITHUB_ENV
           "PACKAGE_PATH=$packagePath" >> $env:GITHUB_ENV
@@ -63,7 +73,7 @@ jobs:
           go vet ./...
 
           New-Item -ItemType Directory -Force release | Out-Null
-          $buildTime = [DateTimeOffset]::Parse((git show -s --format=%cI $env:GITHUB_SHA)).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ")
+          $buildTime = [DateTimeOffset]::Parse((git show -s --format=%cI $target)).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ")
           $ldflags = "-H=windowsgui -s -w -X github.com/fcying/CommandTrayHostGo/internal/app.Version=$version -X github.com/fcying/CommandTrayHostGo/internal/app.BuildTime=$buildTime -X github.com/fcying/CommandTrayHostGo/internal/updater.Repository=$env:GITHUB_REPOSITORY"
           $resourcePath = "cmd/commandtrayhost/commandtrayhost_resources_windows_amd64.syso"
           try {
@@ -74,9 +84,18 @@ jobs:
           }
           go run ./cmd/releasetool pe-resources --exe release/CommandTrayHostGo.exe --version $version
           go run ./cmd/releasetool package --exe release/CommandTrayHostGo.exe --license LICENSE --out $packagePath --modified $buildTime
-          go run ./cmd/releasetool manifest --repository $env:GITHUB_REPOSITORY --version $version --package $packagePath --out $manifestPath --signature $signaturePath
+
+      - name: Generate signed update manifest
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        shell: pwsh
+        env:
+          CTH_UPDATE_PRIVATE_KEY: ${{ secrets.CTH_UPDATE_PRIVATE_KEY }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          go run ./cmd/releasetool manifest --repository $env:GITHUB_REPOSITORY --version $env:VERSION --package $env:PACKAGE_PATH --out $env:MANIFEST_PATH --signature $env:SIGNATURE_PATH
 
       - name: Publish release
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -95,7 +114,7 @@ jobs:
           $arguments = @(
             "release", "create", $env:RELEASE_TAG,
             $env:PACKAGE_PATH, $env:MANIFEST_PATH, $env:SIGNATURE_PATH,
-            "--target", $env:GITHUB_SHA,
+            "--target", $env:TARGET,
             "--generate-notes",
             "--title", $env:VERSION
           )
