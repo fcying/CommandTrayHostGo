@@ -255,7 +255,7 @@ func (a *TrayApp) openUpdatePage(url string) {
 	}
 }
 
-func (a *TrayApp) cancelUpdateCheck() {
+func (a *TrayApp) cancelUpdater() {
 	if a.update.checking {
 		a.update.canceled = true
 	}
@@ -270,14 +270,15 @@ func (a *TrayApp) cancelUpdateCheck() {
 	}
 }
 
-func (a *TrayApp) cleanupUpdater() {
-	a.update.resumeAfterSession = false
-	a.update.resumeManual = false
-	if a.hwnd != 0 {
-		procKillTimer.Call(a.hwnd, updateUITimerID)
-	}
-	a.cancelUpdateCheck()
+func (a *TrayApp) cancelUpdateCheck() {
+	a.cancelUpdater()
+}
+
+func (a *TrayApp) waitUpdater() {
 	a.update.workers.Wait()
+}
+
+func (a *TrayApp) cleanupUpdaterResults() {
 	a.update.pending = nil
 	a.update.cancel = nil
 	a.update.checking = false
@@ -293,4 +294,15 @@ func (a *TrayApp) cleanupUpdater() {
 			return
 		}
 	}
+}
+
+func (a *TrayApp) cleanupUpdater() {
+	a.update.resumeAfterSession = false
+	a.update.resumeManual = false
+	if a.hwnd != 0 {
+		procKillTimer.Call(a.hwnd, updateUITimerID)
+	}
+	a.cancelUpdater()
+	a.waitUpdater()
+	a.cleanupUpdaterResults()
 }

@@ -52,3 +52,54 @@ func TestSessionCancellationDiscardsQueuedSuccessfulDownload(t *testing.T) {
 		t.Fatalf("queued download remains: %v", err)
 	}
 }
+func TestSessionCleanupAppliesHardDeadlineToUpdaterWorker(t *testing.T) {
+	a := &TrayApp{update: newUpdateRuntime()}
+	path := filepath.Join(t.TempDir(), "update.exe")
+	started := make(chan struct{})
+	a.startUpdateWorker(true, true, func(ctx context.Context) updateCheckResult {
+		close(started)
+		<-ctx.Done()
+		time.Sleep(250 * time.Millisecond)
+		if err := os.WriteFile(path, []byte("download"), 0o600); err != nil {
+			return updateCheckResult{err: err}
+		}
+		return updateCheckResult{download: true, updatePath: path}
+	})
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("worker did not start")
+	}
+	startedAt := time.Now()
+	a.cleanupSessionEnd(50 * time.Millisecond)
+	if elapsed := time.Since(startedAt); elapsed > 200*time.Millisecond {
+		t.Fatalf("session cleanup took %s past updater deadline", elapsed)
+	}
+	a.update.workers.Wait()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("canceled download remains after delayed worker: %v", err)
+	}
+}
+
+func TestOrdinaryUpdaterCleanupWaitsForWorker(t *testing.T) {
+	a := &TrayApp{update: newUpdateRuntime()}
+	a.closing.Store(true)
+	started := make(chan struct{})
+	const delay = 100 * time.Millisecond
+	a.startUpdateWorker(false, false, func(ctx context.Context) updateCheckResult {
+		close(started)
+		<-ctx.Done()
+		time.Sleep(delay)
+		return updateCheckResult{}
+	})
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("worker did not start")
+	}
+	startedAt := time.Now()
+	a.cleanupUpdater()
+	if elapsed := time.Since(startedAt); elapsed < delay {
+		t.Fatalf("ordinary cleanup returned after %s, want at least %s", elapsed, delay)
+	}
+}

@@ -169,14 +169,6 @@ func (c *Checker) checkOnce(ctx context.Context, options CheckOptions) (Result, 
 	if !IsComparable(options.CurrentVersion) {
 		return result, nil
 	}
-	if !options.SkipPrereleases && latest.Prerelease {
-		if latest.Tag != options.CurrentVersion {
-			result.Outcome = OutcomeUpdateAvailable
-		} else {
-			result.Outcome = OutcomeUpToDate
-		}
-		return result, nil
-	}
 	currentVersion, _ := ParseVersion(options.CurrentVersion)
 	if Compare(latest.parsedVersion, currentVersion) > 0 {
 		result.Outcome = OutcomeUpdateAvailable

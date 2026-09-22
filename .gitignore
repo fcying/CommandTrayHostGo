@@ -11,3 +11,4 @@ config.json
 command_tray_host.cache
 *.log
 temp/
+/.telegram

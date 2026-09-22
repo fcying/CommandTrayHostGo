@@ -1560,6 +1560,26 @@ func (a *TrayApp) hasBusyEntries() bool {
 	}
 	return false
 }
+func (a *TrayApp) changedConfigStamp(stamp config.FileStamp) (config.FileStamp, bool, error) {
+	if !stamp.MetadataEqual(a.observedConfigStamp) {
+		return stamp, true, nil
+	}
+	digest, err := config.DigestFile(a.configPath)
+	if err != nil {
+		return stamp, false, err
+	}
+	stamp.Digest = digest
+	return stamp, digest != a.observedConfigStamp.Digest, nil
+}
+
+func (a *TrayApp) rememberConfigDigest(stamp config.FileStamp) config.FileStamp {
+	if stamp.Digest == ([32]byte{}) {
+		if digest, err := config.DigestFile(a.configPath); err == nil {
+			stamp.Digest = digest
+		}
+	}
+	return stamp
+}
 
 func (a *TrayApp) checkConfigReload() {
 	procKillTimer.Call(a.hwnd, configReloadTimerID)
@@ -1573,7 +1593,13 @@ func (a *TrayApp) checkConfigReload() {
 		procSetTimer.Call(a.hwnd, configReloadTimerID, configReloadDelay, 0)
 		return
 	}
-	if stamp.Equal(a.observedConfigStamp) {
+	stamp, changed, err := a.changedConfigStamp(stamp)
+	if err != nil {
+		a.reloadPending = true
+		procSetTimer.Call(a.hwnd, configReloadTimerID, configReloadDelay, 0)
+		return
+	}
+	if !changed {
 		return
 	}
 	a.reloadChecking = true
@@ -1591,7 +1617,7 @@ func (a *TrayApp) checkConfigReload() {
 		case idNo:
 			keep = true
 		default:
-			a.observedConfigStamp = stamp
+			a.observedConfigStamp = a.rememberConfigDigest(stamp)
 			return
 		}
 	}
@@ -1604,7 +1630,7 @@ func (a *TrayApp) checkConfigReload() {
 	}
 	candidate, candidateStamp, err := config.LoadSnapshot(a.configPath)
 	if err != nil {
-		a.observedConfigStamp = stamp
+		a.observedConfigStamp = a.rememberConfigDigest(stamp)
 		ShowError(productName, err.Error())
 		return
 	}
@@ -1803,7 +1829,7 @@ func (a *TrayApp) rollbackReload() {
 	}
 	a.observedConfigStamp = reload.stamp
 	a.reloadPending = false
-	if currentStamp, err := config.StatFile(a.configPath); err != nil || !currentStamp.Equal(reload.stamp) {
+	if matches, err := config.MatchesFile(a.configPath, reload.stamp); err != nil || !matches {
 		a.reloadPending = true
 	}
 	procKillTimer.Call(a.hwnd, configReloadTimerID)
@@ -1970,7 +1996,7 @@ func (a *TrayApp) commitReload() {
 	}
 	a.commitStagedHotkeys(reload.hotkeys)
 	a.reload = nil
-	if currentStamp, err := config.StatFile(a.configPath); err == nil && !currentStamp.Equal(a.configStamp) && a.config.HotReloadEnabled() {
+	if matches, err := config.MatchesFile(a.configPath, a.configStamp); err == nil && !matches && a.config.HotReloadEnabled() {
 		a.reloadPending = true
 	}
 	for i := range a.entries {
@@ -3001,7 +3027,9 @@ func (a *TrayApp) cleanupSessionEnd(timeout time.Duration) {
 	a.suspendCron()
 	a.cron = nil
 	a.unregisterAllHotkeys()
-	a.cleanupUpdater()
+	a.update.resumeAfterSession = false
+	a.update.resumeManual = false
+	a.cancelUpdater()
 	for i := range a.entries {
 		a.cacheEntryWindow(i)
 		if a.entries[i].state.Running && !a.entries[i].cronTransient {
@@ -3040,6 +3068,7 @@ func (a *TrayApp) cleanupSessionEnd(timeout time.Duration) {
 	go func() {
 		a.processWorkers.Wait()
 		stops.Wait()
+		a.waitUpdater()
 		close(workersDone)
 	}()
 	remaining := time.Until(deadline)
@@ -3054,6 +3083,7 @@ func (a *TrayApp) cleanupSessionEnd(timeout time.Duration) {
 		}
 	case <-timer.C:
 	}
+	a.cleanupUpdaterResults()
 	for {
 		select {
 		case result := <-a.processResults:

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -62,6 +63,52 @@ func TestParseSourceDigestBindsOriginalBytes(t *testing.T) {
 	}
 	if first.SourceDigest == second.SourceDigest {
 		t.Fatal("distinct equal-length source configs have the same digest")
+	}
+}
+func TestLoadSnapshotDetectsSameStampMutation(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "config.json")
+	original := []byte(validConfig)
+	changed := []byte(strings.Replace(validConfig, "Existing files", "Modified files", 1))
+	if len(original) != len(changed) {
+		t.Fatal("same-stamp regression requires equal-length configs")
+	}
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, firstStamp, err := LoadSnapshot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.SourceDigest != sha256.Sum256(original) || firstStamp.Digest != first.SourceDigest {
+		t.Fatal("initial snapshot did not retain source digest")
+	}
+	if err := os.WriteFile(path, changed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	second, secondStamp, err := LoadSnapshot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !firstStamp.MetadataEqual(secondStamp) {
+		t.Fatal("test did not preserve file metadata")
+	}
+	if second.SourceDigest == first.SourceDigest || secondStamp.Digest == firstStamp.Digest {
+		t.Fatal("same-stamp content mutation was not detected")
+	}
+	matches, err := MatchesFile(path, firstStamp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if matches {
+		t.Fatal("MatchesFile accepted changed content with the old stamp")
 	}
 }
 
@@ -149,6 +196,9 @@ func TestEntryDefaults(t *testing.T) {
 	}
 	if got := entry.EffectiveKillTimeout(); got != 200 {
 		t.Fatalf("EffectiveKillTimeout() = %d, want 200", got)
+	}
+	if got := entry.EffectiveStopCommandTimeout(); got != 10*time.Second {
+		t.Fatalf("EffectiveStopCommandTimeout() = %s, want 10s", got)
 	}
 	if !cfg.EffectiveStartShowSilent() {
 		t.Fatal("EffectiveStartShowSilent() = false, want true")
@@ -668,6 +718,7 @@ func TestParseRejectsNullKnownFields(t *testing.T) {
 		{name: "required boolean", field: `"enabled": null`},
 		{name: "optional boolean", field: `"require_admin": null`},
 		{name: "optional timeout", field: `"kill_timeout": null`},
+		{name: "optional stop command timeout", field: `"stop_cmd_timeout": null`},
 		{name: "optional command", field: `"stop_cmd": null`},
 		{name: "ownership boolean", field: `"not_host_by_commandtrayhost": null`},
 	} {

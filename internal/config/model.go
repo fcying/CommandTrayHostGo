@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/fcying/CommandTrayHostGo/internal/cronexpr"
 )
@@ -38,34 +39,35 @@ type Config struct {
 }
 
 type EntryConfig struct {
-	Name              string       `json:"name"`
-	Path              string       `json:"path"`
-	Command           string       `json:"cmd"`
-	WorkingDirectory  string       `json:"working_directory"`
-	AdditionalEnvPath string       `json:"addition_env_path"`
-	UseBuiltinConsole bool         `json:"use_builtin_console"`
-	IsGUI             bool         `json:"is_gui"`
-	Enabled           bool         `json:"enabled"`
-	RequireAdmin      bool         `json:"require_admin"`
-	StartShow         *bool        `json:"start_show"`
-	IgnoreAll         bool         `json:"ignore_all"`
-	Position          *Pair        `json:"position"`
-	Size              *Pair        `json:"size"`
-	Alpha             *int64       `json:"alpha"`
-	Topmost           bool         `json:"topmost"`
-	NotHosted         bool         `json:"not_host_by_commandtrayhost"`
-	NotMonitored      bool         `json:"not_monitor_by_commandtrayhost"`
-	StopCommand       string       `json:"stop_cmd"`
-	KillTimeout       *int64       `json:"kill_timeout"`
-	KillProcessTree   bool         `json:"kill_process_tree"`
-	ExclusionID       *int64       `json:"exclusion_id"`
-	Hotkey            EntryHotkeys `json:"hotkey"`
-	Cron              *CronConfig  `json:"crontab_config"`
-	Icon              string       `json:"icon"`
-	CachedPosition    *PixelPair   `json:"-"`
-	CachedSize        *PixelPair   `json:"-"`
-	CachedAlpha       *int64       `json:"-"`
-	CachedShow        *bool        `json:"-"`
+	Name               string       `json:"name"`
+	Path               string       `json:"path"`
+	Command            string       `json:"cmd"`
+	WorkingDirectory   string       `json:"working_directory"`
+	AdditionalEnvPath  string       `json:"addition_env_path"`
+	UseBuiltinConsole  bool         `json:"use_builtin_console"`
+	IsGUI              bool         `json:"is_gui"`
+	Enabled            bool         `json:"enabled"`
+	RequireAdmin       bool         `json:"require_admin"`
+	StartShow          *bool        `json:"start_show"`
+	IgnoreAll          bool         `json:"ignore_all"`
+	Position           *Pair        `json:"position"`
+	Size               *Pair        `json:"size"`
+	Alpha              *int64       `json:"alpha"`
+	Topmost            bool         `json:"topmost"`
+	NotHosted          bool         `json:"not_host_by_commandtrayhost"`
+	NotMonitored       bool         `json:"not_monitor_by_commandtrayhost"`
+	StopCommand        string       `json:"stop_cmd"`
+	StopCommandTimeout *int64       `json:"stop_cmd_timeout"`
+	KillTimeout        *int64       `json:"kill_timeout"`
+	KillProcessTree    bool         `json:"kill_process_tree"`
+	ExclusionID        *int64       `json:"exclusion_id"`
+	Hotkey             EntryHotkeys `json:"hotkey"`
+	Cron               *CronConfig  `json:"crontab_config"`
+	Icon               string       `json:"icon"`
+	CachedPosition     *PixelPair   `json:"-"`
+	CachedSize         *PixelPair   `json:"-"`
+	CachedAlpha        *int64       `json:"-"`
+	CachedShow         *bool        `json:"-"`
 }
 
 func (c Config) EffectiveIconSize() int32 {
@@ -192,6 +194,12 @@ func (e EntryConfig) EffectiveKillTimeout() uint32 {
 		return 200
 	}
 	return uint32(*e.KillTimeout)
+}
+func (e EntryConfig) EffectiveStopCommandTimeout() time.Duration {
+	if e.StopCommandTimeout == nil {
+		return 10 * time.Second
+	}
+	return time.Duration(*e.StopCommandTimeout) * time.Millisecond
 }
 
 func (e EntryConfig) PositionPixels(width, height int32) (int32, int32, bool) {

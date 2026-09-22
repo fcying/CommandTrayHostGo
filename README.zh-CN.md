@@ -17,7 +17,7 @@ CommandTrayHostGo 是一个 Windows 托盘进程管理器. 它从 `config.json` 
 - 缓存 enabled、show、position、size 和 alpha 状态.
 - 监控配置文件并事务化热重载.
 - 支持每个物理 EXE 路径独立的单例和 Start on Boot.
-- 检查 GitHub Release; 内置更新器不会下载或执行发布资产.
+- 支持从 GitHub Releases 检查并安装更新. 更新包通过内置 Ed25519 公钥验证签名, 并校验发布包和可执行文件 SHA-256 后才会执行替换.
 - 简体中文和英文界面.
 
 ## 系统要求
@@ -231,12 +231,12 @@ enabled
 |字段|默认值|说明|
 |---|---:|---|
 |`auto_update`|`true`|可比较的构建启动后检查 GitHub Release. 自动生成的测试配置显式设置为 `false`.|
-|`skip_prerelease`|`true`|忽略 prerelease. 设为 `false` 时选择最新已签名 prerelease; 只要其 tag 与当前版本不同就安装更新.|
+|`skip_prerelease`|`true`|忽略 prerelease. 设为 `false` 时选择最新已签名 prerelease, 但只有其版本高于当前版本才安装更新.|
 
 只接受 `v1.2.3`、`v1.2.3-rc.1` 和 `v1.2.3-dev.g<commit>` 等 SemVer tag. 每个 checker 固定绑定一个通过校验的 `owner/repository` 身份, 并只返回三种明确结果: 当前版本未知、已是最新或存在更新.
 
 - 请求仅通过 HTTPS 访问 GitHub Releases API, 最多接受 1 MiB JSON, 并拒绝跳转到 `https://api.github.com` 之外的地址.
-- draft release 和不支持的 tag 会被忽略. 每次 dev 发布都会删除旧 prerelease. `skip_prerelease=true` 排除 prerelease; 设为 `false` 时选择唯一保留的最新 prerelease, 只要 tag 与当前版本不同就更新.
+- draft release 和不支持的 tag 会被忽略. 每次 dev 发布都会删除旧 prerelease. `skip_prerelease=true` 排除 prerelease; 设为 `false` 时选择唯一保留的最新 prerelease, 但只有其版本高于当前版本才更新.
 - 预发布流程先完整分页获取 Release, 再删除现有 prerelease 及其 tag, 包括重跑时的同提交 tag. 正式 Release 不删除.
 - 传输错误、HTTP 408/5xx 及确认属于限流的 403/429 最多重试五次. 服务端 retry header 优先, 所有等待均可通过 context 取消.
 - 开发构建不会自动检查. 手动检查可以显示最新 release, 但不会声称当前版本可比较.
@@ -267,8 +267,9 @@ enabled
 |`topmost`|`false`|窗口置顶.|
 |`not_host_by_commandtrayhost`|`false`|fully detached: 不加入 Job Object, 不保留进程句柄, 不提供窗口和停止控制.|
 |`not_monitor_by_commandtrayhost`|`false`|job-only: 加入 Job Object, 但不保留进程句柄或提供窗口和停止控制. 同时设置两个字段时本字段优先.|
-|`stop_cmd`|空|可选停止命令. 停用时先在 entry 工作目录中通过隐藏的 `cmd.exe /d /s /c` 执行, 再执行原有停止流程. 即使命令失败, 仍继续执行 `WM_CLOSE`/等待/`TerminateProcess` 或专属 Job Object 清理. 命令必须自行结束.|
-|`kill_timeout`|`200`|范围 `0..4294967294` 毫秒. `kill_process_tree=false` 时等待进程退出;GUI 窗口会先收到关闭请求.|
+|`stop_cmd`|空|可选停止命令. 停止时先在 entry 工作目录中通过隐藏的 `cmd.exe /d /s /c` 执行, 再执行原有停止流程. 即使命令失败或超时, 仍继续执行 `WM_CLOSE`/等待/`TerminateProcess` 或专属 Job Object 清理. 该命令的专属 Job Object 会在命令完成或超时时关闭, 因此仍存活的整个进程树都会被终止.|
+|`stop_cmd_timeout`|`10000`|`stop_cmd` 的超时时间, 单位为毫秒. 范围 `0..4294967294`; 到期后开始终止命令进程树, 但不会阻止原有停止流程.|
+|`kill_timeout`|`200`|范围 `0..4294967294` 毫秒. `kill_process_tree=false` 时等待进程退出; GUI 窗口会先收到关闭请求.|
 |`kill_process_tree`|`false`|`true` 立即终止 entry 的专属 Job Object, 包括 `stop_cmd` 先结束根进程后仍存活的后代, 不等待 `kill_timeout`. `false` 等待 `kill_timeout`, 必要时再只终止根进程.|
 |`exclusion_id`|未设置|范围 `1..2147483647` 的整数. 启动前停止同 ID 的其他运行中受管 entry,但跳过 `ignore_all` 项. 不允许用于 detached/job-only entry.|
 |`hotkey`|空对象|当前 entry 的热键映射.|

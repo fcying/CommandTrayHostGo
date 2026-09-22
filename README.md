@@ -17,7 +17,7 @@ This project started as a Go rewrite of the C++ [rexdf/CommandTrayHost](https://
 - Cache enabled, show, position, size, and opacity state.
 - Watch the configuration file and apply transactional hot reloads.
 - Maintain an independent singleton and Start on Boot registration for each physical EXE path.
-- Check GitHub Releases without downloading or executing release assets.
+- Check GitHub Releases and install updates only after verifying the signed manifest, package, and executable.
 - Provide English and Simplified Chinese interfaces.
 
 ## Requirements
@@ -229,12 +229,12 @@ A hotkey cannot be assigned to more than one action.
 | Field | Default | Description |
 |---|---:|---|
 | `auto_update` | `true` | Check GitHub Releases at startup for comparable builds. The generated test configuration explicitly sets this to `false`. |
-| `skip_prerelease` | `true` | Ignore prereleases. Set to `false` to select the latest signed prerelease; any selected prerelease whose tag differs from the current version is installed. |
+| `skip_prerelease` | `true` | Ignore prereleases. Set to `false` to select the latest signed prerelease only when it is newer than the current version. |
 
 Only SemVer tags such as `v1.2.3`, `v1.2.3-rc.1`, and `v1.2.3-dev.g<commit>` are accepted. Each checker is bound to one validated `owner/repository` identity and returns one explicit outcome: unknown current version, up to date, or update available.
 
 - Requests use the GitHub Releases API over HTTPS, accept at most 1 MiB of JSON, and reject redirects outside `https://api.github.com`.
-- Draft releases and unsupported tags are ignored. Each dev publish deletes older prereleases. `skip_prerelease=true` excludes prereleases; setting it to `false` selects the newest remaining prerelease and updates whenever its tag differs from the current version.
+- Draft releases and unsupported tags are ignored. Each dev publish deletes older prereleases. `skip_prerelease=true` excludes prereleases; setting it to `false` selects the newest remaining prerelease and updates only when it is newer than the current version.
 - Prerelease publication enumerates all release pages before deleting existing prereleases and their tags, including the same commit tag on a rerun. Formal releases are retained.
 - Transport errors, HTTP 408/5xx, and confirmed 403/429 rate limits are retried at most five times. Server retry headers take precedence; every wait is context-cancellable.
 - Development builds do not check automatically. A manual check may report the latest release without claiming that the current version is comparable.
@@ -265,7 +265,8 @@ Only SemVer tags such as `v1.2.3`, `v1.2.3-rc.1`, and `v1.2.3-dev.g<commit>` are
 | `topmost` | `false` | Keep the target window topmost. |
 | `not_host_by_commandtrayhost` | `false` | Fully detached mode: no Job Object assignment, retained process handle, stop control, or window control. |
 | `not_monitor_by_commandtrayhost` | `false` | Job-only mode: keep Job Object ownership but no retained process handle, stop control, or window control. Takes precedence when both ownership fields are true. |
-| `stop_cmd` | empty | Optional command executed through hidden `cmd.exe /d /s /c` in the entry working directory before the normal stop flow. The normal `WM_CLOSE`/wait/`TerminateProcess` or dedicated Job Object cleanup still runs, even when this command fails. The command must finish on its own. |
+| `stop_cmd` | empty | Optional command executed through hidden `cmd.exe /d /s /c` in the entry working directory before the normal stop flow. The normal `WM_CLOSE`/wait/`TerminateProcess` or dedicated Job Object cleanup still runs, even when this command fails or times out. Its dedicated Job Object is closed when the command completes or times out, terminating any remaining process tree. |
+| `stop_cmd_timeout` | `10000` | Timeout for `stop_cmd`, in milliseconds. Range `0..4294967294`; when it expires, termination of the command process tree is initiated, but the normal stop flow still runs. |
 | `kill_timeout` | `200` | Range `0..4294967294` milliseconds. Wait for exit when `kill_process_tree=false`; GUI windows first receive a close request. |
 | `kill_process_tree` | `false` | `true` immediately terminates the entry's dedicated Job Object, including descendants that remain after `stop_cmd` exits the root process, without waiting for `kill_timeout`. `false` waits for `kill_timeout` before terminating only the root process if needed. |
 | `exclusion_id` | unset | Integer in `1..2147483647`. Starting this entry first stops other running managed entries with the same ID, except `ignore_all` peers. Not valid for detached or job-only entries. |
