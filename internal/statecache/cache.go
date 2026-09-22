@@ -367,6 +367,7 @@ func (s *Store) mergePrevious(previous *Store) {
 		if match >= 0 {
 			s.entries[i] = previous.entries[match]
 			used[match] = true
+			s.entries[i].Name = s.config.Configs[i].Name
 		}
 	}
 }
@@ -446,17 +447,30 @@ func (s *Store) UpdateWindow(index int, state WindowState) {
 	oldHeight := int64(item.Bottom) - int64(item.Top)
 	newWidth := int64(state.Right) - int64(state.Left)
 	newHeight := int64(state.Bottom) - int64(state.Top)
-	if s.config.CachePositionEnabled() && (item.Left != state.Left || item.Top != state.Top || item.Valid&validPosition == 0) {
-		item.Left = state.Left
-		item.Top = state.Top
-		item.Valid |= validPosition
-		s.dirty = true
-	}
-	if s.config.CacheSizeEnabled() && (oldWidth != newWidth || oldHeight != newHeight || item.Valid&validSize == 0) {
+	cachePosition := s.config.CachePositionEnabled()
+	cacheSize := s.config.CacheSizeEnabled()
+	positionChanged := item.Left != state.Left || item.Top != state.Top || item.Valid&validPosition == 0
+	sizeChanged := oldWidth != newWidth || oldHeight != newHeight || item.Valid&validSize == 0
+	switch {
+	case cachePosition && cacheSize:
 		item.Left = state.Left
 		item.Top = state.Top
 		item.Right = state.Right
 		item.Bottom = state.Bottom
+	case cachePosition:
+		item.Left = state.Left
+		item.Top = state.Top
+		item.Right = state.Left + int32(oldWidth)
+		item.Bottom = state.Top + int32(oldHeight)
+	case cacheSize:
+		item.Right = item.Left + int32(newWidth)
+		item.Bottom = item.Top + int32(newHeight)
+	}
+	if cachePosition && positionChanged {
+		item.Valid |= validPosition
+		s.dirty = true
+	}
+	if cacheSize && sizeChanged {
 		item.Valid |= validSize
 		s.dirty = true
 	}

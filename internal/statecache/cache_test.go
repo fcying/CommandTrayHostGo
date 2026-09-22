@@ -375,6 +375,113 @@ func TestUpdateWindowTracksSizeIndependentOfPosition(t *testing.T) {
 	}
 }
 
+func TestUpdateWindowMoveOnlyPreservesCachedSize(t *testing.T) {
+	trueValue := true
+	cfg := testConfig()
+	cfg.EnableCache = &trueValue
+	store := newStore("unused", &cfg)
+	store.UpdateWindow(0, WindowState{Left: 100, Top: 100, Right: 500, Bottom: 400})
+	store.dirty = false
+	store.UpdateWindow(0, WindowState{Left: 200, Top: 100, Right: 600, Bottom: 400})
+	item := store.entries[0]
+	if item.Left != 200 || item.Top != 100 || item.Right != 600 || item.Bottom != 400 {
+		t.Fatalf("cached rectangle = (%d, %d, %d, %d), want (200, 100, 600, 400)", item.Left, item.Top, item.Right, item.Bottom)
+	}
+	if width, height := item.Right-item.Left, item.Bottom-item.Top; width != 400 || height != 300 {
+		t.Fatalf("cached size = (%d, %d), want (400, 300)", width, height)
+	}
+}
+
+func TestUpdateWindowDoesNotMutateDisabledCachedSize(t *testing.T) {
+	cfg := exerciseWindowCacheToggle(t, true)
+	cachedPosition := cfg.Configs[0].CachedPosition
+	if cachedPosition == nil || *cachedPosition != (config.PixelPair{200, 100}) {
+		t.Fatalf("cached position = %v, want (200, 100)", cachedPosition)
+	}
+	cachedSize := cfg.Configs[0].CachedSize
+	if cachedSize == nil || *cachedSize != (config.PixelPair{400, 300}) {
+		t.Fatalf("cached size = %v, want (400, 300)", cachedSize)
+	}
+}
+
+func TestUpdateWindowDoesNotMutateDisabledCachedPosition(t *testing.T) {
+	cfg := exerciseWindowCacheToggle(t, false)
+	cachedPosition := cfg.Configs[0].CachedPosition
+	if cachedPosition == nil || *cachedPosition != (config.PixelPair{100, 100}) {
+		t.Fatalf("cached position = %v, want (100, 100)", cachedPosition)
+	}
+	cachedSize := cfg.Configs[0].CachedSize
+	if cachedSize == nil || *cachedSize != (config.PixelPair{600, 400}) {
+		t.Fatalf("cached size = %v, want (600, 400)", cachedSize)
+	}
+}
+
+func exerciseWindowCacheToggle(t *testing.T, disableSize bool) config.Config {
+	t.Helper()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cachePath := filepath.Join(dir, "command_tray_host.cache")
+	if err := os.WriteFile(configPath, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	enabled := true
+	disabled := true
+	reenabled := false
+	cfg := config.Config{
+		EnableCache: &enabled,
+		Configs:     []config.EntryConfig{{Name: "demo", Enabled: true}},
+	}
+	stamp, err := config.StatFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous, err := Rebase(cachePath, &cfg, stamp, nil, KeepPrevious)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous.UpdateWindow(0, WindowState{Left: 100, Top: 100, Right: 500, Bottom: 400})
+	if err := previous.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	disabledConfig := cfg
+	if disableSize {
+		disabledConfig.DisableCacheSize = &disabled
+	} else {
+		disabledConfig.DisableCachePosition = &disabled
+	}
+	disabledStore, err := Rebase(cachePath, &disabledConfig, stamp, previous, KeepPrevious)
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabledStore.UpdateWindow(0, WindowState{Left: 200, Top: 100, Right: 800, Bottom: 500})
+	item := disabledStore.entries[0]
+	if item.Valid&(validPosition|validSize) != validPosition|validSize {
+		t.Fatalf("cached validity = %d, want both geometry bits", item.Valid)
+	}
+	if disableSize {
+		if item.Left != 200 || item.Top != 100 || item.Right != 600 || item.Bottom != 400 {
+			t.Fatalf("cached rectangle with size disabled = (%d, %d, %d, %d), want (200, 100, 600, 400)", item.Left, item.Top, item.Right, item.Bottom)
+		}
+	} else if item.Left != 100 || item.Top != 100 || item.Right != 700 || item.Bottom != 500 {
+		t.Fatalf("cached rectangle with position disabled = (%d, %d, %d, %d), want (100, 100, 700, 500)", item.Left, item.Top, item.Right, item.Bottom)
+	}
+	if err := disabledStore.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	reenabledConfig := disabledConfig
+	if disableSize {
+		reenabledConfig.DisableCacheSize = &reenabled
+	} else {
+		reenabledConfig.DisableCachePosition = &reenabled
+	}
+	if _, err := OpenSnapshot(cachePath, &reenabledConfig, stamp, false); err != nil {
+		t.Fatal(err)
+	}
+	return reenabledConfig
+}
+
 func TestMergeDoesNotReuseDuplicateNames(t *testing.T) {
 	trueValue := true
 	cfg := config.Config{
@@ -515,6 +622,50 @@ func TestRebaseKeepsUnsavedStateAndUpdatesConfigTime(t *testing.T) {
 	}
 	if newStore.configModTime != changed.UnixNano() {
 		t.Fatalf("configModTime = %d, want %d", newStore.configModTime, changed.UnixNano())
+	}
+}
+
+func TestRebaseRenamePersistsNewCacheIdentity(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cachePath := filepath.Join(dir, "command_tray_host.cache")
+	if err := os.WriteFile(configPath, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	trueValue := true
+	falseValue := false
+	oldConfig := config.Config{
+		EnableCache:         &trueValue,
+		DisableCacheEnabled: &falseValue,
+		Configs:             []config.EntryConfig{{Name: "old", Path: ".", Command: "demo.exe"}},
+	}
+	previous := newStore(cachePath, &oldConfig)
+	previous.UpdateState(0, false, true)
+	newConfig := config.Config{
+		EnableCache:         &trueValue,
+		DisableCacheEnabled: &falseValue,
+		Configs:             []config.EntryConfig{{Name: "new", Path: ".", Command: "demo.exe"}},
+	}
+	stamp, err := config.StatFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := Rebase(cachePath, &newConfig, stamp, previous, KeepPrevious)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.entries[0].Name != "new" {
+		t.Fatalf("rebased cache name = %q, want new", store.entries[0].Name)
+	}
+	if err := store.Save(); err != nil {
+		t.Fatal(err)
+	}
+	reloadedConfig := newConfig
+	if _, err := OpenSnapshot(cachePath, &reloadedConfig, stamp, false); err != nil {
+		t.Fatal(err)
+	}
+	if reloadedConfig.Configs[0].Enabled || !reloadedConfig.Configs[0].EffectiveStartShow() {
+		t.Fatal("renamed entry did not restore cached state after reload")
 	}
 }
 

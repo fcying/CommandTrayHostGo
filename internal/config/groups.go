@@ -43,7 +43,10 @@ func (item *GroupItem) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &object); err != nil {
 		return errors.New("must be a configs name or group object")
 	}
-	rawName, ok := findJSONField(object, "name")
+	rawName, ok, err := findUniqueJSONField(object, "name", "group")
+	if err != nil {
+		return err
+	}
 	if !ok {
 		return errors.New("group object is missing required field name")
 	}
@@ -56,7 +59,11 @@ func (item *GroupItem) UnmarshalJSON(data []byte) error {
 	}
 
 	var items []GroupItem
-	if rawItems, ok := findJSONField(object, "groups"); ok {
+	rawItems, ok, err := findUniqueJSONField(object, "groups", "group")
+	if err != nil {
+		return err
+	}
+	if ok {
 		if bytes.Equal(bytes.TrimSpace(rawItems), []byte("null")) {
 			return errors.New("group groups must be an array")
 		}

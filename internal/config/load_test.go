@@ -762,6 +762,26 @@ func TestParseRejectsCaseInsensitiveNullKnownFields(t *testing.T) {
 	}
 }
 
+func TestParseRejectsCaseInsensitiveDuplicateFields(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{name: "root configs", data: []byte(strings.Replace(validConfig, `"configs":`, `"CONFIGS": [], "configs":`, 1))},
+		{name: "root hotkey", data: []byte(strings.Replace(validConfig, `"configs":`, `"HOTKEY": {}, "hotkey": {}, "configs":`, 1))},
+		{name: "entry field", data: []byte(strings.Replace(validConfig, `"name": "demo",`, `"name": "demo", "NAME": "other",`, 1))},
+		{name: "entry hotkey field", data: []byte(strings.Replace(validConfig, `"enabled": true,`, `"enabled": true, "hotkey": {"hide_show": "a", "HIDE_SHOW": "b"},`, 1))},
+		{name: "cron field", data: []byte(strings.Replace(validConfig, `"enabled": true,`, `"enabled": true, "crontab_config": {"crontab": "* * * * * *", "CRONTAB": "* * * * * *", "method": "start", "count": 0},`, 1))},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := Parse(test.data); err == nil {
+				t.Fatal("Parse succeeded, want duplicate case-insensitive field error")
+			}
+		})
+	}
+}
+
 func TestParseAcceptsCaseInsensitiveRequiredFields(t *testing.T) {
 	data := []byte(`{
   "CONFIGS": [{
