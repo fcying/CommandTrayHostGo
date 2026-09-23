@@ -58,7 +58,7 @@ jobs:
           } else {
             $version = "$sourceVersion-dev.g$($target.Substring(0, 12))"
             # Keep the comparable SemVer in the build and manifest; use one rolling tag for dev prereleases.
-            $releaseTag = "dev"
+            $releaseTag = "dev-latest"
           }
           $packagePath = "release/CommandTrayHostGo-$version-windows-amd64.zip"
           $manifestPath = "release/CommandTrayHostGo-$version-update.json"

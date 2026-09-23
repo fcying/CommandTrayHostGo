@@ -20,7 +20,7 @@ const (
 	maxCheckAttempts        = 5
 	checkRetryDelay         = 15 * time.Second
 	secondaryRateLimitDelay = time.Minute
-	developmentReleaseTag   = "dev"
+	developmentReleaseTag   = "dev-latest"
 )
 
 var (
@@ -70,10 +70,11 @@ type Checker struct {
 }
 
 type githubRelease struct {
-	TagName    string `json:"tag_name"`
-	Name       string `json:"name"`
-	Draft      bool   `json:"draft"`
-	Prerelease bool   `json:"prerelease"`
+	TagName     string `json:"tag_name"`
+	Name        string `json:"name"`
+	Draft       bool   `json:"draft"`
+	Prerelease  bool   `json:"prerelease"`
+	PublishedAt string `json:"published_at"`
 }
 
 func NewChecker(repository string) (*Checker, error) {
@@ -210,8 +211,11 @@ func (c *Checker) responseError(response *http.Response) error {
 }
 
 func (c *Checker) selectLatest(releases []githubRelease, skipPrereleases bool) (Release, error) {
-	var latest Release
+	var latestByVersion Release
+	var latestByPublishedAt Release
+	var latestPublishedAt time.Time
 	found := false
+	allPublishedAtKnown := true
 	for _, release := range releases {
 		if release.Draft || skipPrereleases && release.Prerelease {
 			continue
@@ -234,17 +238,26 @@ func (c *Checker) selectLatest(releases []githubRelease, skipPrereleases bool) (
 			Prerelease:    release.Prerelease,
 			parsedVersion: version,
 		}
-		if !skipPrereleases && candidate.Prerelease {
-			return candidate, nil
+		if !found || Compare(version, latestByVersion.parsedVersion) > 0 {
+			latestByVersion = candidate
 		}
-		if !found || Compare(version, latest.parsedVersion) > 0 {
-			latest, found = candidate, true
+		publishedAt, err := time.Parse(time.RFC3339Nano, release.PublishedAt)
+		if err != nil {
+			allPublishedAtKnown = false
+		} else if latestPublishedAt.IsZero() || publishedAt.After(latestPublishedAt) ||
+			publishedAt.Equal(latestPublishedAt) && Compare(version, latestByPublishedAt.parsedVersion) > 0 {
+			latestByPublishedAt = candidate
+			latestPublishedAt = publishedAt
 		}
+		found = true
 	}
 	if !found {
 		return Release{}, errNoReleases
 	}
-	return latest, nil
+	if skipPrereleases || !allPublishedAtKnown {
+		return latestByVersion, nil
+	}
+	return latestByPublishedAt, nil
 }
 
 type transientCheckError struct {
