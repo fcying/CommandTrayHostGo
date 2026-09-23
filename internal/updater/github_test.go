@@ -60,9 +60,54 @@ func TestCheckerSelectsHighestCompatibleRelease(t *testing.T) {
 	}
 }
 
+func TestCheckerSelectsMostRecentlyPublishedRelease(t *testing.T) {
+	tests := []struct {
+		name     string
+		releases string
+		wantTag  string
+	}{
+		{
+			name:     "formal release published later",
+			releases: `[{"tag_name":"dev-latest","name":"v1.2.0-dev.g000000000001","draft":false,"prerelease":true,"published_at":"2026-09-22T09:00:00Z"},{"tag_name":"v1.1.0","draft":false,"prerelease":false,"published_at":"2026-09-23T09:00:00Z"}]`,
+			wantTag:  "v1.1.0",
+		},
+		{
+			name:     "rolling development release published later",
+			releases: `[{"tag_name":"dev-latest","name":"v1.2.0-dev.g000000000001","draft":false,"prerelease":true,"published_at":"2026-09-23T09:00:00Z"},{"tag_name":"v1.1.0","draft":false,"prerelease":false,"published_at":"2026-09-22T09:00:00Z"}]`,
+			wantTag:  "dev-latest",
+		},
+		{
+			name:     "formal release wins publish-time tie by SemVer",
+			releases: `[{"tag_name":"dev-latest","name":"v1.2.0-dev.g000000000001","draft":false,"prerelease":true,"published_at":"2026-09-23T09:00:00Z"},{"tag_name":"v1.2.0","draft":false,"prerelease":false,"published_at":"2026-09-23T09:00:00Z"}]`,
+			wantTag:  "v1.2.0",
+		},
+		{
+			name:     "missing dates fall back to highest SemVer",
+			releases: `[{"tag_name":"dev-latest","name":"v1.2.0-dev.g000000000001","draft":false,"prerelease":true},{"tag_name":"v1.3.0","draft":false,"prerelease":false}]`,
+			wantTag:  "v1.3.0",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+				writeJSON(response, test.releases)
+			}))
+			defer server.Close()
+			checker := checkerForServer(t, server)
+			result, err := checker.Check(context.Background(), CheckOptions{CurrentVersion: "v1.0.0-dev.g000000000001"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Latest.Tag != test.wantTag || result.Outcome != OutcomeUpdateAvailable {
+				t.Fatalf("Check() = %+v, want tag %q and update available", result, test.wantTag)
+			}
+		})
+	}
+}
+
 func TestCheckerUpdatesToDifferentSelectedPrerelease(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
-		writeJSON(response, `[{"tag_name":"v1.0.0-dev.2","draft":false,"prerelease":true},{"tag_name":"v2.0.0","draft":false,"prerelease":false}]`)
+		writeJSON(response, `[{"tag_name":"v1.0.0-dev.2","draft":false,"prerelease":true,"published_at":"2026-09-23T09:00:00Z"},{"tag_name":"v2.0.0","draft":false,"prerelease":false,"published_at":"2026-09-22T09:00:00Z"}]`)
 	}))
 	defer server.Close()
 	checker := checkerForServer(t, server)
@@ -78,7 +123,7 @@ func TestCheckerUpdatesToDifferentSelectedPrerelease(t *testing.T) {
 }
 func TestCheckerSelectsRollingDevReleaseVersion(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
-		writeJSON(response, `[{"tag_name":"dev","name":"v1.0.0-dev.g000000000001","draft":false,"prerelease":true}]`)
+		writeJSON(response, `[{"tag_name":"dev","name":"v0.9.0-dev.gffffffffffff","draft":false,"prerelease":true},{"tag_name":"dev-latest","name":"v1.0.0-dev.g000000000001","draft":false,"prerelease":true}]`)
 	}))
 	defer server.Close()
 	checker := checkerForServer(t, server)
@@ -93,7 +138,7 @@ func TestCheckerSelectsRollingDevReleaseVersion(t *testing.T) {
 		{current: "v0.9.0", outcome: OutcomeUpdateAvailable},
 	} {
 		result, err := checker.Check(context.Background(), CheckOptions{CurrentVersion: test.current})
-		if err != nil || result.Latest.Tag != "dev" || result.Latest.Version != "v1.0.0-dev.g000000000001" || result.Latest.URL != "https://github.com/owner/repository/releases/tag/dev" || result.Outcome != test.outcome {
+		if err != nil || result.Latest.Tag != "dev-latest" || result.Latest.Version != "v1.0.0-dev.g000000000001" || result.Latest.URL != "https://github.com/owner/repository/releases/tag/dev-latest" || result.Outcome != test.outcome {
 			t.Fatalf("Check(%q) = %+v, %v", test.current, result, err)
 		}
 	}

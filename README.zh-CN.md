@@ -231,15 +231,15 @@ enabled
 |字段|默认值|说明|
 |---|---:|---|
 |`auto_update`|`true`|可比较的构建启动后检查 GitHub Release. 自动生成的测试配置显式设置为 `false`.|
-|`skip_prerelease`|`true`|默认忽略 prerelease. 设为 `false` 时在更新检查中包含已签名 prerelease.|
+|`skip_prerelease`|`true`|默认忽略 prerelease. 设为 `false` 时同时考虑 prerelease 和正式 release.|
 
-只接受 `v1.2.3`、`v1.2.3-rc.1` 和 `v1.2.3-dev.g<commit>` 等 SemVer release version. 滚动 GitHub tag `dev` 也会被接受, 但其 prerelease 标题必须包含 SemVer version; 资源从 `dev` 路径下载, 并按标题 version 校验. 每个 checker 固定绑定一个通过校验的 `owner/repository` 身份, 并只返回三种明确结果: 当前版本未知、已是最新或存在更新.
+只接受 `v1.2.3`、`v1.2.3-rc.1` 和 `v1.2.3-dev.g<commit>` 等 SemVer release version. 滚动 GitHub tag `dev-latest` 也会被接受, 但其 prerelease 标题必须包含 SemVer version; 资源从 `dev-latest` 路径下载, 并按标题 version 校验. 每个 checker 固定绑定一个通过校验的 `owner/repository` 身份, 并只返回三种明确结果: 当前版本未知、已是最新或存在更新.
 
 - 请求仅通过 HTTPS 访问 GitHub Releases API, 最多接受 1 MiB JSON, 并拒绝跳转到 `https://api.github.com` 之外的地址.
-- draft release 和不支持的 tag 会被忽略. 滚动 `dev` prerelease 会在每次 prerelease 发布时替换, 包括同仓库 PR 发布; 其他 PR 和 fork PR 只运行检查, 不发布. `skip_prerelease=true` 排除 prerelease; 设为 `false` 时包含滚动 `dev` prerelease. `dev` 的基础版本更高时允许更新; 基础版本相同时, 当前版本也是 prerelease 且开发版本不同就更新. 不会安装基础版本更低的 `dev` 版本.
-- 预发布流程先完整分页获取 Release, 再删除现有 prerelease 及其 tag, 包括重跑时的滚动 `dev` tag. 正式 Release 不删除.
+- draft release 和不支持的 tag 会被忽略. 滚动 `dev-latest` prerelease 会在每次 prerelease 发布时替换, 包括同仓库 PR 发布; 其他 PR 和 fork PR 只运行检查, 不发布. `skip_prerelease=true` 排除 prerelease; 设为 `false` 时同时考虑正式版和 prerelease. 所有有效候选都有有效 `published_at` 时选择发布时间最新的 release, 时间相同时选择 SemVer 较高的版本; 任一时间缺失或无效时选择 SemVer 最高版本. 滚动 `dev-latest` 的基础版本更高时允许更新; 基础版本相同时, 当前版本也是 prerelease 且开发版本不同时更新. 不会安装基础版本更低的 `dev-latest` 版本.
+- 预发布流程先完整分页获取 Release, 再删除现有 prerelease 及其 tag, 包括重跑时的滚动 `dev-latest` tag. 正式 Release 不删除.
 - 传输错误、HTTP 408/5xx 及确认属于限流的 403/429 最多重试五次. 服务端 retry header 优先, 所有等待均可通过 context 取消.
-- 可比较的开发构建在 `skip_prerelease=false` 时可以检查滚动 `dev` prerelease. 不可比较的开发构建不会自动检查. 手动检查可以显示最新 release, 但不会声称当前版本可比较.
+- 可比较的开发构建在 `skip_prerelease=false` 且滚动 `dev-latest` 被选为最新候选时, 可以使用该 prerelease. 不可比较的开发构建不会自动检查. 手动检查可以显示最新 release, 但不会声称当前版本可比较.
 - 确认更新后, 客户端下载规范签名 manifest 和更新包, 校验签名及 SHA-256 摘要, 然后替换 EXE 并重启.
 - 重启后的应用等待更新 helper 退出, 再删除 helper EXE 和 `.previous` 备份. 清理错误通过消息框报告.
 - 安装失败时, helper 使用原配置及启动用户 SID 重启仍可用或已成功恢复的旧 EXE. 回滚失败则保留备份, 不启动未经确认的目标; 安装及恢复错误合并报告. 失败事务可能保留临时文件以便恢复.
@@ -377,7 +377,7 @@ second minute hour day-of-month month day-of-week
 - Docked Windows.
 - Exit.
 
-发现兼容的新版本时, 检查更新会通过 HTTPS 下载签名 manifest 和更新包, 校验 Ed25519 签名及两个 SHA-256 摘要, 然后退出、替换 EXE 并自动重启. 当前开发构建可比较且 `skip_prerelease=false` 时, 这也包括滚动 `dev` prerelease; 不可比较的开发构建不会自动安装更新.
+发现兼容的新版本时, 检查更新会通过 HTTPS 下载签名 manifest 和更新包, 校验 Ed25519 签名及两个 SHA-256 摘要, 然后退出、替换 EXE 并自动重启. 当前开发构建可比较且 `skip_prerelease=false` 时, 这也包括滚动 `dev-latest` prerelease; 不可比较的开发构建不会自动安装更新.
 
 单击 entry 的 path 会打开目录; 单击 cmd 会在 Explorer 中定位可执行文件.
 

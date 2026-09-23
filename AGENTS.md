@@ -22,7 +22,7 @@
 - Do not commit `dist/`, `*.exe`, runtime `config.json`, `*.cache`, logs, test fixtures, evidence archives, or generated `.syso` files.
 
 - `.github/workflows/release.yml` runs tests, vet, the Windows build, PE resource verification, and deterministic packaging on pull requests and pushes to `main`.
-- Pull requests from this repository also generate signed manifests and publish the rolling `dev` prerelease; pull requests from forks stop after build, test, and package. A push to `main` creates a formal Release when the source version tag does not exist; otherwise it replaces the rolling `dev` prerelease, deleting every older prerelease first. The release title and manifest retain the comparable SemVer version. Account for this publishing side effect before modifying or pushing `main`.
+- Pull requests from this repository also generate signed manifests and publish the rolling `dev-latest` prerelease; pull requests from forks stop after build, test, and package. A push to `main` creates a formal Release when the source version tag does not exist; otherwise it replaces the rolling `dev-latest` prerelease, deleting every older prerelease first. The release title and manifest retain the comparable SemVer version. Account for this publishing side effect before modifying or pushing `main`.
 - The workflow fetches full Git history to inspect tags and generate release notes, and reads the build time from the current commit. Do not duplicate the version in another configuration file or maintain generated resources manually.
 - The repository is public. Use authenticated GitHub access when inspecting its Actions runs and Releases.
 
